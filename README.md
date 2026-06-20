@@ -1,5 +1,8 @@
 # pi-mesh
 
+[![npm](https://img.shields.io/npm/v/%40ahkohd%2Fpi-mesh)](https://www.npmjs.com/package/@ahkohd/pi-mesh)
+[![crates.io](https://img.shields.io/crates/v/pi-mesh)](https://crates.io/crates/pi-mesh)
+
 P2P mesh for Pi agent sessions.
 
 Each machine runs one local service. Pi sessions register with that service, then agents can send messages or request replies from agents on the same machine or another machine.
