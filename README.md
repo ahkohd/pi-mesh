@@ -7,6 +7,44 @@ P2P mesh for Pi agent sessions.
 
 Each machine runs one local service. Pi sessions register with that service, then agents can send messages or request replies from agents on the same machine or another machine.
 
+## Install
+
+Install the Pi extension:
+
+```bash
+pi install npm:@ahkohd/pi-mesh
+```
+
+Install the service binaries:
+
+```bash
+cargo install pi-mesh
+```
+
+The npm package installs the Pi extension. The Cargo package installs `pi-mesh` and the included `pi-mesh-tailscale` connector on `PATH`.
+
+## Quick setup
+
+Run the install commands on each machine that should join the mesh. If you use Tailscale, make sure `tailscale status` works on each machine.
+
+Then start the mesh from Pi:
+
+```text
+/mesh on
+```
+
+Check what the local service can see:
+
+```text
+/mesh list
+```
+
+To join through a known peer, pass its service address:
+
+```text
+/mesh on 100.64.0.8:7373
+```
+
 ## How it works
 
 ```text
