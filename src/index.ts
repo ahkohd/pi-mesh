@@ -12,7 +12,17 @@ const CONTROL = process.env.PI_MESH_CONTROL_URL ?? "http://127.0.0.1:7372";
 const PROTOCOL_VERSION = 1;
 const requireFromHere = createRequire(import.meta.url);
 const BIN = process.env.PI_MESH_BIN ?? bundledBin("pi-mesh") ?? "pi-mesh";
-const ALIASES = join(homedir(), ".pi", "mesh", "aliases.json");
+const ALIASES = join(appDataDir(), "pi-mesh", "aliases.json");
+const ADJ = [
+  "brave", "calm", "clever", "cosmic", "curious", "dapper", "dusty", "fuzzy", "gentle", "glad",
+  "golden", "happy", "honest", "jolly", "lazy", "lucky", "neon", "nimble", "quiet", "rapid",
+  "rusty", "shiny", "sleepy", "solar", "tidy", "tiny", "velvet", "witty", "zesty", "zippy",
+];
+const NOUN = [
+  "badger", "beaver", "bobcat", "falcon", "ferret", "fox", "gecko", "heron", "koala", "lemur",
+  "lynx", "marmot", "moose", "otter", "panda", "penguin", "quokka", "rabbit", "raven", "seal",
+  "sloth", "sparrow", "tiger", "turtle", "weasel", "whale", "wombat", "yak", "zebra", "zorilla",
+];
 
 type MeshMsg = {
   from: string;
@@ -246,7 +256,7 @@ function startHeartbeat() {
   clearInterval(heartbeat);
   heartbeat = setInterval(() => {
     void registerSelf().catch(() => undefined);
-  }, 15_000);
+  }, 1_000);
 }
 
 async function meshOff() {
@@ -285,13 +295,19 @@ async function readAliases(): Promise<Record<string, string>> {
 async function saveAlias(id: string, alias: string) {
   const aliases = await readAliases();
   aliases[id] = alias;
-  await mkdir(join(homedir(), ".pi", "mesh"), { recursive: true });
+  await mkdir(dirname(ALIASES), { recursive: true });
   await writeFile(ALIASES, JSON.stringify(aliases, null, 2));
+}
+
+function appDataDir() {
+  if (process.platform === "darwin") return join(homedir(), "Library", "Application Support");
+  if (process.platform === "win32") return process.env.APPDATA ?? join(homedir(), "AppData", "Roaming");
+  return process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share");
 }
 
 function funnyName(input: string) {
   const bytes = createHash("sha256").update(input).digest();
-  return `agent-${bytes.toString("hex").slice(0, 6)}`;
+  return `${ADJ[bytes[0] % ADJ.length]}-${NOUN[bytes[1] % NOUN.length]}`;
 }
 
 function machine() {

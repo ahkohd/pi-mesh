@@ -96,12 +96,6 @@ name@machine
 
 Agents may target either the id or the alias. Alias collisions are rejected.
 
-Aliases are stored in:
-
-```text
-~/.pi/mesh/aliases.json
-```
-
 ## Running
 
 Normally, start from Pi:

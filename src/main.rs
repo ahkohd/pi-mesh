@@ -675,7 +675,7 @@ async fn peer_loop(state: AppState) {
                 }
             });
         }
-        time::sleep(Duration::from_secs(15)).await;
+        time::sleep(Duration::from_secs(5)).await;
     }
 }
 
@@ -684,7 +684,7 @@ async fn prune_stale_local_agents(state: &AppState) {
     let stale: Vec<String> = inner
         .local_agents
         .iter()
-        .filter(|(_, agent)| agent.last_seen.elapsed() > Duration::from_secs(45))
+        .filter(|(_, agent)| agent.last_seen.elapsed() > Duration::from_secs(3))
         .map(|(name, _)| name.clone())
         .collect();
     for name in stale {
