@@ -9,6 +9,16 @@ description = "P2P mesh for Pi agent sessions"
 readme = "README.md"
 keywords = ["pi", "agent", "mesh", "p2p"]
 categories = ["network-programming"]
+exclude = [
+    "/.github/",
+    "/bin/",
+    "/npm/",
+    "/scripts/",
+    "/package.json",
+    "/package-lock.json",
+    "/tsconfig.json",
+    "src/index.ts",
+]
 
 [dependencies]
 axum = { version = "0.8", features = ["json", "tokio", "http1"] }

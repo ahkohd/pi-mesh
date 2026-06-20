@@ -9,29 +9,30 @@ Each machine runs one local service. Pi sessions register with that service, the
 
 ## Install
 
-Install the Pi extension from npm:
+Install from npm:
 
 ```bash
 pi install npm:@ahkohd/pi-mesh
 ```
 
-Or install the package directly with npm:
+This installs the Pi extension and the matching prebuilt `pi-mesh` service binaries for your platform.
+Prebuilt npm binaries are published for macOS arm64/x64 and Linux glibc arm64/x64.
+
+If you are not using Pi's package installer, install the npm package directly:
 
 ```bash
 npm install @ahkohd/pi-mesh
 ```
 
-Install or update the service binaries:
+Cargo is available as a fallback or development install:
 
 ```bash
 cargo install --force --locked pi-mesh
 ```
 
-The npm package installs the Pi extension. The Cargo package installs `pi-mesh` and the included `pi-mesh-tailscale` connector on `PATH`.
-
 ## Quick setup
 
-Run the install commands on each machine that should join the mesh. If you use Tailscale, make sure `tailscale status` works on each machine.
+Run the install command on each machine that should join the mesh. If you use Tailscale, make sure `tailscale status` works on each machine.
 
 Then start the mesh from Pi:
 

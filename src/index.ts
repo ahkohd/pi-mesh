@@ -2,12 +2,15 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { createRequire } from "node:module";
+import { basename, delimiter, dirname, join } from "node:path";
 import { homedir, hostname } from "node:os";
 
 const CONTROL = process.env.PI_MESH_CONTROL_URL ?? "http://127.0.0.1:7372";
-const BIN = process.env.PI_MESH_BIN ?? "pi-mesh";
+const requireFromHere = createRequire(import.meta.url);
+const BIN = process.env.PI_MESH_BIN ?? bundledBin("pi-mesh") ?? "pi-mesh";
 const ALIASES = join(homedir(), ".pi", "mesh", "aliases.json");
 
 const ADJ = ["brave", "calm", "clever", "cosmic", "fuzzy", "glad", "lazy", "neon", "quiet", "rapid"];
@@ -142,7 +145,7 @@ export default function (pi: ExtensionAPI) {
 async function ensureDaemon() {
   if (await daemonUp()) return;
 
-  const child = spawn(BIN, ["daemon"], { detached: true, stdio: "ignore" });
+  const child = spawn(BIN, ["daemon"], { detached: true, stdio: "ignore", env: serviceEnv(BIN) });
   child.unref();
 
   const deadline = Date.now() + 5000;
@@ -151,6 +154,43 @@ async function ensureDaemon() {
     await sleep(150);
   }
   throw new Error(`failed to start ${BIN}`);
+}
+
+function bundledBin(name: string) {
+  const packageName = platformPackageName();
+  if (!packageName) return undefined;
+
+  try {
+    const packageJson = requireFromHere.resolve(`${packageName}/package.json`);
+    const binary = join(dirname(packageJson), "bin", executableName(name));
+    return existsSync(binary) ? binary : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function platformPackageName() {
+  if (process.platform === "darwin" && process.arch === "arm64") return "@ahkohd/pi-mesh-darwin-arm64";
+  if (process.platform === "darwin" && process.arch === "x64") return "@ahkohd/pi-mesh-darwin-x64";
+  if (process.platform === "linux" && process.arch === "arm64") return "@ahkohd/pi-mesh-linux-arm64-gnu";
+  if (process.platform === "linux" && process.arch === "x64") return "@ahkohd/pi-mesh-linux-x64-gnu";
+  return undefined;
+}
+
+function executableName(name: string) {
+  return process.platform === "win32" ? `${name}.exe` : name;
+}
+
+function serviceEnv(bin: string): NodeJS.ProcessEnv {
+  if (!isPathLike(bin)) return process.env;
+  return {
+    ...process.env,
+    PATH: [dirname(bin), process.env.PATH].filter(Boolean).join(delimiter),
+  };
+}
+
+function isPathLike(bin: string) {
+  return bin.includes("/") || bin.includes("\\");
 }
 
 async function daemonUp() {

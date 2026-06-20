@@ -14,15 +14,20 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "pi-mesh": "bin/pi-mesh.js",
+    "pi-mesh-tailscale": "bin/pi-mesh-tailscale.js"
+  },
   "pi": {
     "extensions": ["./dist/index.js"]
   },
-  "files": ["dist", "README.md"],
+  "files": ["bin", "dist", "LICENSE.md", "README.md"],
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "cargo test && npm run typecheck",
-    "pack:dry": "npm pack --dry-run"
+    "pack:dry": "npm pack --dry-run",
+    "version:sync": "node scripts/sync-npm-version.cjs"
   },
   "publishConfig": {
     "access": "public",
@@ -31,6 +36,12 @@
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.78.0",
     "typebox": "^1.1.38"
+  },
+  "optionalDependencies": {
+    "@ahkohd/pi-mesh-darwin-arm64": "0.1.0",
+    "@ahkohd/pi-mesh-darwin-x64": "0.1.0",
+    "@ahkohd/pi-mesh-linux-arm64-gnu": "0.1.0",
+    "@ahkohd/pi-mesh-linux-x64-gnu": "0.1.0"
   },
   "devDependencies": {
     "@types/node": "^25.8.0",

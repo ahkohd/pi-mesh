@@ -1,0 +1,22 @@
+{
+  "name": "@ahkohd/pi-mesh-darwin-arm64",
+  "version": "0.1.0",
+  "description": "Prebuilt service binaries for @ahkohd/pi-mesh (darwin arm64)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ahkohd/pi-mesh.git",
+    "directory": "npm/darwin-arm64"
+  },
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "bin": {
+    "pi-mesh": "bin/pi-mesh",
+    "pi-mesh-tailscale": "bin/pi-mesh-tailscale"
+  },
+  "files": ["bin/pi-mesh", "bin/pi-mesh-tailscale", "README.md"],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}
