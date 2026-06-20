@@ -36,24 +36,27 @@ To join through a known peer, pass its service address:
 
 ## How it works
 
-```text
-Pi session -> local service -> remote service -> remote Pi session
+```mermaid
+flowchart LR
+  localSession["Pi session"] --> localService["local service"]
+  localService --> remoteService["remote service"]
+  remoteService --> remoteSession["remote Pi session"]
 ```
 
 One service can serve many Pi sessions on the same machine. If a service stops, only that machine drops from the mesh.
 
-Services learn about each other from seeds, connectors, and peer gossip. Once two services make contact, they exchange known peers and agents.
+Services learn about each other from known peer addresses, connectors, and peer gossip. Once two services make contact, they exchange known peers and agents.
 
 ## Commands
 
 ```text
-/mesh on [seed]
+/mesh on [peer]
 /mesh off
 /mesh list
 /mesh alias [name]
 ```
 
-`/mesh on [seed]` starts or connects to the local service, registers the current session, and begins polling for messages. The optional seed is another service address, such as `100.64.0.8:7373`.
+`/mesh on [peer]` starts or connects to the local service, registers the current session, and begins polling for messages. The optional peer is another service address, such as `100.64.0.8:7373`.
 
 `/mesh off` unregisters the current session and stops polling.
 
@@ -134,11 +137,11 @@ curl http://127.0.0.1:7372/health
 curl http://127.0.0.1:7372/local/list
 ```
 
-## Seeds
+## Known peers
 
-Seeds are service addresses in `host:port` form.
+Known peers are service addresses in `host:port` form.
 
-Seed sources:
+Sources:
 
 - `/mesh on host:port`
 - `pi-mesh daemon --seed host:port`
