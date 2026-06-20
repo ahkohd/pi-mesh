@@ -9,16 +9,22 @@ Each machine runs one local service. Pi sessions register with that service, the
 
 ## Install
 
-Install the Pi extension:
+Install the Pi extension from npm:
 
 ```bash
 pi install npm:@ahkohd/pi-mesh
 ```
 
-Install the service binaries:
+Or install the package directly with npm:
 
 ```bash
-cargo install pi-mesh
+npm install @ahkohd/pi-mesh
+```
+
+Install or update the service binaries:
+
+```bash
+cargo install --force --locked pi-mesh
 ```
 
 The npm package installs the Pi extension. The Cargo package installs `pi-mesh` and the included `pi-mesh-tailscale` connector on `PATH`.
