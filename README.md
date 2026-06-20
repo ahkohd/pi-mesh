@@ -1,7 +1,6 @@
 # pi-mesh
 
 [![npm](https://img.shields.io/npm/v/%40ahkohd%2Fpi-mesh)](https://www.npmjs.com/package/@ahkohd/pi-mesh)
-[![crates.io](https://img.shields.io/crates/v/pi-mesh)](https://crates.io/crates/pi-mesh)
 
 P2P mesh for Pi agent sessions.
 
@@ -9,25 +8,8 @@ Each machine runs one local service. Pi sessions register with that service, the
 
 ## Install
 
-Install from npm:
-
 ```bash
 pi install npm:@ahkohd/pi-mesh
-```
-
-This installs the Pi extension and the matching prebuilt `pi-mesh` service binaries for your platform.
-Prebuilt npm binaries are published for macOS arm64/x64 and Linux glibc arm64/x64.
-
-If you are not using Pi's package installer, install the npm package directly:
-
-```bash
-npm install @ahkohd/pi-mesh
-```
-
-Cargo is available as a fallback or development install:
-
-```bash
-cargo install --force --locked pi-mesh
 ```
 
 ## Quick setup
