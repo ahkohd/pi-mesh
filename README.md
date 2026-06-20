@@ -162,12 +162,13 @@ pi-mesh-*
 For discovery, the service starts each connector like this:
 
 ```bash
-pi-mesh-example run --port 7373 --machine mbp --node-id abc
+pi-mesh-example run --port 7373
 ```
 
 The connector prints newline-delimited JSON events:
 
 ```json
+{"type":"self","addr":"100.64.0.7:7373","source":"example"}
 {"type":"peer","addr":"100.64.0.8:7373","source":"example"}
 ```
 
@@ -198,7 +199,7 @@ Connector-specific docs:
 | `PI_MESH_CONTROL_ADDR` | `127.0.0.1:7372` | Local control API bind address. |
 | `PI_MESH_LISTEN_HOST` | `0.0.0.0` | Network API bind host. |
 | `PI_MESH_PORT` | `7373` | First network port to try. Ports are scanned through `7399`. |
-| `PI_MESH_ADVERTISE` | `<machine>:<port>` | Address announced to peers. Set this when the default hostname is not reachable. |
+| `PI_MESH_ADVERTISE` | `<machine>:<port>` | Address announced to peers. If unset, a connector may replace it with a reachable address. |
 | `PI_MESH_PEERS` | unset | Comma-separated peer addresses. |
 | `PI_MESH_INSECURE` | unset | Set to `1` to allow non-loopback inbound traffic without connector auth. Use only for local tests. |
 

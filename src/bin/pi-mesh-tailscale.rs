@@ -1,5 +1,5 @@
 use serde_json::{json, Value};
-use std::{env, io::Write, process::Command, thread, time::Duration};
+use std::{env, io::Write, process::Command};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -25,11 +25,7 @@ fn auth(args: &[String]) {
 }
 
 fn run(args: &[String]) {
-    let port = arg(args, "--port").unwrap_or("7373").to_string();
-    loop {
-        discover(&port);
-        thread::sleep(Duration::from_secs(15));
-    }
+    discover(arg(args, "--port").unwrap_or("7373"));
 }
 
 fn discover(port: &str) {
@@ -45,6 +41,10 @@ fn discover(port: &str) {
     let Ok(v) = serde_json::from_slice::<Value>(&output.stdout) else {
         return;
     };
+    if let Some(addr) = v.get("Self").and_then(|node| node_addr(node, port)) {
+        emit("self", &addr);
+    }
+
     let Some(peers) = v.get("Peer").and_then(Value::as_object) else {
         return;
     };
@@ -53,28 +53,28 @@ fn discover(port: &str) {
         if peer.get("Online").and_then(Value::as_bool) == Some(false) {
             continue;
         }
-        if let Some(ip) = peer
-            .get("TailscaleIPs")
-            .and_then(Value::as_array)
-            .and_then(|ips| ips.first())
-            .and_then(Value::as_str)
-        {
-            emit(&format!("{ip}:{port}"));
-        }
-        if let Some(dns) = peer.get("DNSName").and_then(Value::as_str) {
-            let dns = dns.trim_end_matches('.');
-            if !dns.is_empty() {
-                emit(&format!("{dns}:{port}"));
-            }
+        if let Some(addr) = node_addr(peer, port) {
+            emit("peer", &addr);
         }
     }
 }
 
-fn emit(addr: &str) {
-    println!(
-        "{}",
-        json!({"type":"peer","addr":addr,"source":"tailscale"})
-    );
+fn node_addr(node: &Value, port: &str) -> Option<String> {
+    if let Some(ip) = node
+        .get("TailscaleIPs")
+        .and_then(Value::as_array)
+        .and_then(|ips| ips.first())
+        .and_then(Value::as_str)
+    {
+        return Some(format!("{ip}:{port}"));
+    }
+
+    let dns = node.get("DNSName")?.as_str()?.trim_end_matches('.');
+    (!dns.is_empty()).then(|| format!("{dns}:{port}"))
+}
+
+fn emit(kind: &str, addr: &str) {
+    println!("{}", json!({"type":kind,"addr":addr,"source":"tailscale"}));
     let _ = std::io::stdout().flush();
 }
 

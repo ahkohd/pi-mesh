@@ -16,22 +16,23 @@ export PATH="$PWD/target/debug:$PATH"
 The service starts the connector like this:
 
 ```bash
-pi-mesh-tailscale run --port 7373 --machine mbp --node-id abc
+pi-mesh-tailscale run --port 7373
 ```
 
-The connector polls:
+Each run calls:
 
 ```bash
 tailscale status --json
 ```
 
-For each online Tailscale peer, it emits newline-delimited JSON:
+It emits newline-delimited JSON:
 
 ```json
+{"type":"self","addr":"100.64.0.7:7373","source":"tailscale"}
 {"type":"peer","addr":"100.64.0.8:7373","source":"tailscale"}
 ```
 
-It emits both the peer's first Tailscale IP and DNS name when available.
+The service uses `self` as its advertised address unless `PI_MESH_ADVERTISE` is set. It emits the first Tailscale IP, falling back to DNS when needed.
 
 ## Authorization
 
@@ -60,4 +61,4 @@ Otherwise it replies with `allow: false`.
 - Tailscale must be installed, running, and authenticated.
 - Peer machines must be online in the same tailnet.
 - The remote pi-mesh service must be reachable on its mesh port, usually `7373`.
-- Set `PI_MESH_ADVERTISE` if the default `<machine>:<port>` address is not reachable by Tailscale peers.
+- Set `PI_MESH_ADVERTISE` only if you want to override the Tailscale address.

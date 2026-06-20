@@ -16,7 +16,6 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
     net::TcpListener,
     process::Command,
     sync::{oneshot, Mutex, Notify},
@@ -27,6 +26,8 @@ use uuid::Uuid;
 const CONTROL_ADDR: &str = "127.0.0.1:7372";
 const START_PORT: u16 = 7373;
 const END_PORT: u16 = 7399;
+const PROTOCOL_VERSION: u32 = 1;
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 type AnyResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Clone)]
@@ -39,6 +40,7 @@ struct AppState {
 
 struct Inner {
     advertise: String,
+    advertise_locked: bool,
     machine: String,
     local_agents: HashMap<String, LocalAgent>,
     remote_agents: HashMap<String, RemoteAgent>,
@@ -70,6 +72,8 @@ struct MeshMessage {
 #[derive(Debug, Serialize)]
 struct Health {
     ok: bool,
+    version: &'static str,
+    protocol: u32,
     machine: String,
     advertise: String,
     local_agents: Vec<AgentInfo>,
@@ -127,12 +131,15 @@ struct NextQuery {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct AnnounceReq {
+    #[serde(default)]
+    protocol: u32,
     addr: String,
     agents: Vec<AgentInfo>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct AnnounceResp {
+    protocol: u32,
     addr: String,
     peers: Vec<String>,
     agents: Vec<AgentInfo>,
@@ -165,9 +172,9 @@ async fn run_daemon(mut peers: Vec<String>) -> AnyResult<()> {
         .parse()?;
 
     let (network_listener, port) = bind_network().await?;
-    let advertise =
-        env::var("PI_MESH_ADVERTISE").unwrap_or_else(|_| format!("{}:{}", machine, port));
-
+    let env_advertise = env::var("PI_MESH_ADVERTISE").ok();
+    let advertise_locked = env_advertise.is_some();
+    let advertise = env_advertise.unwrap_or_else(|| format!("{}:{}", machine, port));
     peers.extend(read_peer_file());
     peers.sort();
     peers.dedup();
@@ -177,6 +184,7 @@ async fn run_daemon(mut peers: Vec<String>) -> AnyResult<()> {
     let state = AppState {
         inner: Arc::new(Mutex::new(Inner {
             advertise: advertise.clone(),
+            advertise_locked,
             machine: machine.clone(),
             local_agents: HashMap::new(),
             remote_agents: HashMap::new(),
@@ -208,6 +216,7 @@ async fn run_daemon(mut peers: Vec<String>) -> AnyResult<()> {
         .route("/local/request", post(local_request))
         .route("/local/reply", post(local_reply))
         .route("/local/next", get(local_next))
+        .route("/local/shutdown", post(local_shutdown))
         .with_state(state.clone());
 
     let network = Router::new()
@@ -259,6 +268,8 @@ async fn health_payload(state: &AppState) -> Health {
     let inner = state.inner.lock().await;
     Health {
         ok: true,
+        version: VERSION,
+        protocol: PROTOCOL_VERSION,
         machine: inner.machine.clone(),
         advertise: inner.advertise.clone(),
         local_agents: inner
@@ -280,6 +291,14 @@ async fn health_payload(state: &AppState) -> Health {
             })
             .collect(),
     }
+}
+
+async fn local_shutdown() -> impl IntoResponse {
+    tokio::spawn(async {
+        time::sleep(Duration::from_millis(50)).await;
+        std::process::exit(0);
+    });
+    (StatusCode::OK, Json(json!({"ok": true})))
 }
 
 fn alias_taken(inner: &Inner, id: &str, alias: &str) -> bool {
@@ -321,6 +340,7 @@ async fn unregister(
     let mut inner = state.inner.lock().await;
     inner.local_agents.remove(&req.id);
     inner.queues.remove(&req.id);
+    state.notify.notify_waiters();
     (StatusCode::OK, Json(json!({"ok": true}))).into_response()
 }
 
@@ -426,6 +446,14 @@ async fn pop_next(state: &AppState, agent: &str) -> Option<MeshMessage> {
     inner.queues.get_mut(agent).and_then(|q| q.pop_front())
 }
 
+fn reachable_addr(advertised: &str, remote: SocketAddr) -> String {
+    let port = advertised
+        .rsplit_once(':')
+        .and_then(|(_, port)| port.parse().ok())
+        .unwrap_or(START_PORT);
+    SocketAddr::new(remote.ip(), port).to_string()
+}
+
 async fn announce(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     AxumState(state): AxumState<AppState>,
@@ -434,10 +462,19 @@ async fn announce(
     if !authorize(&state, addr.ip()).await {
         return (StatusCode::FORBIDDEN, "forbidden").into_response();
     }
+    if req.protocol != PROTOCOL_VERSION {
+        return (StatusCode::UPGRADE_REQUIRED, "protocol mismatch").into_response();
+    }
     let mut inner = state.inner.lock().await;
     if req.addr != inner.advertise {
-        inner.peers.insert(req.addr.clone());
-        for agent in req.agents {
+        let peer_addr = reachable_addr(&req.addr, addr);
+        let mut live = HashSet::new();
+        inner.peers.insert(peer_addr.clone());
+        for mut agent in req.agents {
+            if agent.addr == req.addr {
+                agent.addr = peer_addr.clone();
+                live.insert(agent.id.clone());
+            }
             if !inner.local_agents.contains_key(&agent.id) {
                 inner.remote_agents.insert(
                     agent.id.clone(),
@@ -448,6 +485,9 @@ async fn announce(
                 );
             }
         }
+        inner
+            .remote_agents
+            .retain(|id, agent| agent.addr != peer_addr || live.contains(id));
     }
     announce_response(&inner).into_response()
 }
@@ -610,6 +650,7 @@ fn announce_response(inner: &Inner) -> Json<AnnounceResp> {
         addr: agent.addr.clone(),
     }));
     Json(AnnounceResp {
+        protocol: PROTOCOL_VERSION,
         addr: inner.advertise.clone(),
         peers: inner.peers.iter().cloned().collect(),
         agents,
@@ -629,7 +670,9 @@ async fn peer_loop(state: AppState) {
         for peer in peers {
             let state = state.clone();
             tokio::spawn(async move {
-                let _ = announce_to_peer(&state, &peer).await;
+                if announce_to_peer(&state, &peer).await.is_err() {
+                    prune_peer(&state, &peer).await;
+                }
             });
         }
         time::sleep(Duration::from_secs(15)).await;
@@ -651,6 +694,12 @@ async fn prune_stale_local_agents(state: &AppState) {
     }
 }
 
+async fn prune_peer(state: &AppState, peer: &str) {
+    let mut inner = state.inner.lock().await;
+    inner.peers.remove(peer);
+    inner.remote_agents.retain(|_, agent| agent.addr != peer);
+}
+
 async fn announce_to_peer(state: &AppState, peer: &str) -> Result<(), String> {
     let req = {
         let inner = state.inner.lock().await;
@@ -658,6 +707,7 @@ async fn announce_to_peer(state: &AppState, peer: &str) -> Result<(), String> {
             return Ok(());
         }
         AnnounceReq {
+            protocol: PROTOCOL_VERSION,
             addr: inner.advertise.clone(),
             agents: inner
                 .local_agents
@@ -683,16 +733,24 @@ async fn announce_to_peer(state: &AppState, peer: &str) -> Result<(), String> {
         return Err(format!("announce failed: {}", resp.status()));
     }
     let data: AnnounceResp = resp.json().await.map_err(|e| e.to_string())?;
+    if data.protocol != PROTOCOL_VERSION {
+        return Err(format!("protocol mismatch: {}", data.protocol));
+    }
     let mut inner = state.inner.lock().await;
     if data.addr != inner.advertise {
-        inner.peers.insert(data.addr.clone());
+        inner.peers.insert(peer.to_string());
     }
     for peer in data.peers {
         if peer != inner.advertise {
             inner.peers.insert(peer);
         }
     }
-    for agent in data.agents {
+    let mut live = HashSet::new();
+    for mut agent in data.agents {
+        if agent.addr == data.addr {
+            agent.addr = peer.to_string();
+            live.insert(agent.id.clone());
+        }
         if !inner.local_agents.contains_key(&agent.id) && agent.addr != inner.advertise {
             inner.remote_agents.insert(
                 agent.id.clone(),
@@ -703,48 +761,52 @@ async fn announce_to_peer(state: &AppState, peer: &str) -> Result<(), String> {
             );
         }
     }
+    inner
+        .remote_agents
+        .retain(|id, agent| agent.addr != peer || live.contains(id));
     Ok(())
 }
 
 async fn connector_loop(state: AppState, port: u16) {
-    for connector in state.connectors.iter().cloned() {
-        let state = state.clone();
-        tokio::spawn(async move {
-            run_connector(state, connector, port).await;
-        });
+    loop {
+        for connector in state.connectors.iter().cloned() {
+            let state = state.clone();
+            tokio::spawn(async move {
+                run_connector(state, connector, port).await;
+            });
+        }
+        time::sleep(Duration::from_secs(15)).await;
     }
 }
 
 async fn run_connector(state: AppState, connector: PathBuf, port: u16) {
-    let mut child = match Command::new(&connector)
+    let Ok(output) = Command::new(&connector)
         .arg("run")
         .arg("--port")
         .arg(port.to_string())
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(e) => {
-            eprintln!("pi-mesh: connector {} failed: {e}", connector.display());
-            return;
-        }
-    };
-
-    let Some(stdout) = child.stdout.take() else {
+        .output()
+        .await
+    else {
         return;
     };
-    let mut lines = BufReader::new(stdout).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        let Ok(event) = serde_json::from_str::<ConnectorEvent>(&line) else {
+
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let Ok(event) = serde_json::from_str::<ConnectorEvent>(line) else {
             continue;
         };
-        if event.kind == "peer" {
-            if let Some(addr) = event.addr {
-                let state = state.clone();
-                tokio::spawn(async move {
-                    let _ = announce_to_peer(&state, &addr).await;
-                });
+        let Some(addr) = event.addr else {
+            continue;
+        };
+        if event.kind == "self" {
+            let mut inner = state.inner.lock().await;
+            if !inner.advertise_locked {
+                inner.advertise = addr;
             }
+        } else if event.kind == "peer" {
+            let state = state.clone();
+            tokio::spawn(async move {
+                let _ = announce_to_peer(&state, &addr).await;
+            });
         }
     }
 }

@@ -9,12 +9,10 @@ import { basename, delimiter, dirname, join } from "node:path";
 import { homedir, hostname } from "node:os";
 
 const CONTROL = process.env.PI_MESH_CONTROL_URL ?? "http://127.0.0.1:7372";
+const PROTOCOL_VERSION = 1;
 const requireFromHere = createRequire(import.meta.url);
 const BIN = process.env.PI_MESH_BIN ?? bundledBin("pi-mesh") ?? "pi-mesh";
 const ALIASES = join(homedir(), ".pi", "mesh", "aliases.json");
-
-const ADJ = ["brave", "calm", "clever", "cosmic", "fuzzy", "glad", "lazy", "neon", "quiet", "rapid"];
-const NOUN = ["badger", "beaver", "falcon", "otter", "panda", "raven", "tiger", "yak", "zebra", "koala"];
 
 type MeshMsg = {
   from: string;
@@ -35,7 +33,8 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("mesh", {
     description: "pi-mesh: /mesh on [peer], /mesh off, /mesh list, /mesh alias [name]",
     handler: async (args, ctx) => {
-      const [cmd = "list", rest] = splitOnce(args.trim());
+      const [cmd = "list", ...restParts] = args.trim().split(/\s+/).filter(Boolean);
+      const rest = restParts.join(" ") || undefined;
 
       if (cmd === "on") {
         const id = makeAgentId(ctx);
@@ -58,8 +57,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       if (cmd === "list") {
-        const list = await getJson("/local/list");
-        ctx.ui.notify(formatList(list), "info");
+        ctx.ui.notify(await agentListText(), "info");
         return;
       }
 
@@ -88,8 +86,13 @@ export default function (pi: ExtensionAPI) {
     description: "List pi-mesh agents available by id and alias.",
     parameters: Type.Object({}),
     async execute() {
-      const list = await getJson("/local/list");
-      return { content: [{ type: "text", text: formatList(list) }], details: list };
+      const current = currentAgent();
+      try {
+        const list = await getJson("/local/list");
+        return { content: [{ type: "text", text: formatList(list, current) }], details: { current, ...list } };
+      } catch {
+        return { content: [{ type: "text", text: meshOffText() }], details: { current } };
+      }
     },
   });
 
@@ -143,14 +146,16 @@ export default function (pi: ExtensionAPI) {
 }
 
 async function ensureDaemon() {
-  if (await daemonUp()) return;
+  if (await daemonCompatible()) return;
+  await post("/local/shutdown", {}).catch(() => undefined);
+  await sleep(150);
 
   const child = spawn(BIN, ["daemon"], { detached: true, stdio: "ignore", env: serviceEnv(BIN) });
   child.unref();
 
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
-    if (await daemonUp()) return;
+    if (await daemonCompatible()) return;
     await sleep(150);
   }
   throw new Error(`failed to start ${BIN}`);
@@ -191,6 +196,15 @@ function serviceEnv(bin: string): NodeJS.ProcessEnv {
 
 function isPathLike(bin: string) {
   return bin.includes("/") || bin.includes("\\");
+}
+
+async function daemonCompatible() {
+  try {
+    const health = await getJson("/health");
+    return health.protocol === PROTOCOL_VERSION;
+  } catch {
+    return false;
+  }
 }
 
 async function daemonUp() {
@@ -277,7 +291,7 @@ async function saveAlias(id: string, alias: string) {
 
 function funnyName(input: string) {
   const bytes = createHash("sha256").update(input).digest();
-  return `${ADJ[bytes[0] % ADJ.length]}-${NOUN[bytes[1] % NOUN.length]}`;
+  return `agent-${bytes.toString("hex").slice(0, 6)}`;
 }
 
 function machine() {
@@ -286,14 +300,6 @@ function machine() {
 
 function slug(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "agent";
-}
-
-function splitOnce(s: string): [string | undefined, string | undefined] {
-  const trimmed = s.trim();
-  if (!trimmed) return [undefined, undefined];
-  const i = trimmed.search(/\s/);
-  if (i < 0) return [trimmed, undefined];
-  return [trimmed.slice(0, i), trimmed.slice(i).trim() || undefined];
 }
 
 function formatIncoming(msg: MeshMsg) {
@@ -314,11 +320,29 @@ function lastAssistantText(messages: any[]) {
   return "";
 }
 
-function formatList(list: any) {
-  const show = (x: any) => `${x.alias} (${x.id}) ${x.addr}`;
+async function agentListText() {
+  const current = currentAgent();
+  try {
+    return formatList(await getJson("/local/list"), current);
+  } catch {
+    return meshOffText();
+  }
+}
+
+function currentAgent() {
+  return agentId && agentAlias ? { id: agentId, alias: agentAlias } : undefined;
+}
+
+function meshOffText() {
+  return "current: mesh off (this Pi session is not registered)";
+}
+
+function formatList(list: any, current?: { id: string; alias: string }) {
+  const show = (x: any) => `${x.alias} (${x.id}) ${x.addr}${current?.id === x.id ? " [me]" : ""}`;
   const local = (list.local ?? []).map(show).join("\n  ") || "none";
   const remote = (list.remote ?? []).map(show).join("\n  ") || "none";
-  return `self: ${list.self}\nlocal:\n  ${local}\nremote:\n  ${remote}`;
+  const me = current ? `${current.alias} (${current.id})` : "mesh off (this Pi session is not registered)";
+  return `current: ${me}\nservice: ${list.self}\nlocal:\n  ${local}\nremote:\n  ${remote}`;
 }
 
 async function getJson(path: string) {
