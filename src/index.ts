@@ -33,7 +33,7 @@ let pendingReplyIds: string[] = [];
 
 export default function (pi: ExtensionAPI) {
   pi.registerCommand("mesh", {
-    description: "pi-mesh: /mesh on [seed], /mesh off, /mesh list, /mesh alias [name]",
+    description: "pi-mesh: /mesh on [peer], /mesh off, /mesh list, /mesh alias [name]",
     handler: async (args, ctx) => {
       const [cmd = "list", rest] = splitOnce(args.trim());
 
@@ -43,7 +43,7 @@ export default function (pi: ExtensionAPI) {
         agentId = id;
         agentAlias = alias;
         await ensureDaemon();
-        if (rest) await post("/local/seed", { addr: rest });
+        if (rest) await post("/local/peer", { addr: rest });
         await registerSelf();
         startPolling(pi, id);
         startHeartbeat();
@@ -78,7 +78,7 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      ctx.ui.notify("usage: /mesh on [seed] | off | list | alias [name]", "error");
+      ctx.ui.notify("usage: /mesh on [peer] | off | list | alias [name]", "error");
     },
   });
 
@@ -275,8 +275,8 @@ async function saveAlias(id: string, alias: string) {
   await writeFile(ALIASES, JSON.stringify(aliases, null, 2));
 }
 
-function funnyName(seed: string) {
-  const bytes = createHash("sha256").update(seed).digest();
+function funnyName(input: string) {
+  const bytes = createHash("sha256").update(input).digest();
   return `${ADJ[bytes[0] % ADJ.length]}-${NOUN[bytes[1] % NOUN.length]}`;
 }
 

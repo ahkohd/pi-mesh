@@ -119,7 +119,7 @@ To join through a known peer:
 You can also start the service directly:
 
 ```bash
-pi-mesh daemon --seed 100.64.0.8:7373
+pi-mesh daemon --peer 100.64.0.8:7373
 ```
 
 On startup it prints the local control address, the network listen address, and the address it advertises to peers:
@@ -127,7 +127,7 @@ On startup it prints the local control address, the network listen address, and 
 ```text
 pi-mesh: control http://127.0.0.1:7372
 pi-mesh: listen  http://0.0.0.0:7373
-pi-mesh: seed    machine:7373
+pi-mesh: addr    machine:7373
 ```
 
 Check a local service:
@@ -144,9 +144,9 @@ Known peers are service addresses in `host:port` form.
 Sources:
 
 - `/mesh on host:port`
-- `pi-mesh daemon --seed host:port`
-- `PI_MESH_SEEDS=host1:7373,host2:7373`
-- `~/.pi/mesh/seeds`, one address per line, with `#` comments allowed
+- `pi-mesh daemon --peer host:port`
+- `PI_MESH_PEERS=host1:7373,host2:7373`
+- `~/.pi/mesh/peers`, one address per line, with `#` comments allowed
 - connector discovery events
 
 ## Connectors
@@ -199,7 +199,7 @@ Connector-specific docs:
 | `PI_MESH_LISTEN_HOST` | `0.0.0.0` | Network API bind host. |
 | `PI_MESH_PORT` | `7373` | First network port to try. Ports are scanned through `7399`. |
 | `PI_MESH_ADVERTISE` | `<machine>:<port>` | Address announced to peers. Set this when the default hostname is not reachable. |
-| `PI_MESH_SEEDS` | unset | Comma-separated seed addresses. |
+| `PI_MESH_PEERS` | unset | Comma-separated peer addresses. |
 | `PI_MESH_INSECURE` | unset | Set to `1` to allow non-loopback inbound traffic without connector auth. Use only for local tests. |
 
 ## Development

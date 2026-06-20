@@ -90,7 +90,7 @@ struct RegisterReq {
 }
 
 #[derive(Debug, Deserialize)]
-struct SeedReq {
+struct PeerReq {
     addr: String,
 }
 
@@ -153,11 +153,12 @@ async fn main() -> AnyResult<()> {
         return Ok(());
     }
 
-    run_daemon().await?;
+    let peers = cli_peers(&args);
+    run_daemon(peers).await?;
     Ok(())
 }
 
-async fn run_daemon() -> AnyResult<()> {
+async fn run_daemon(mut peers: Vec<String>) -> AnyResult<()> {
     let machine = machine_name();
     let control_addr: SocketAddr = env::var("PI_MESH_CONTROL_ADDR")
         .unwrap_or_else(|_| CONTROL_ADDR.to_string())
@@ -167,6 +168,10 @@ async fn run_daemon() -> AnyResult<()> {
     let advertise =
         env::var("PI_MESH_ADVERTISE").unwrap_or_else(|_| format!("{}:{}", machine, port));
 
+    peers.extend(read_peer_file());
+    peers.sort();
+    peers.dedup();
+
     let connectors = Arc::new(find_connectors());
 
     let state = AppState {
@@ -175,7 +180,7 @@ async fn run_daemon() -> AnyResult<()> {
             machine: machine.clone(),
             local_agents: HashMap::new(),
             remote_agents: HashMap::new(),
-            peers: HashSet::new(),
+            peers: peers.into_iter().collect(),
             queues: HashMap::new(),
             waiters: HashMap::new(),
         })),
@@ -190,7 +195,7 @@ async fn run_daemon() -> AnyResult<()> {
     eprintln!("pi-mesh: listen  http://0.0.0.0:{port}");
     eprintln!("pi-mesh: addr    {advertise}");
 
-    tokio::spawn(seed_loop(state.clone()));
+    tokio::spawn(peer_loop(state.clone()));
     tokio::spawn(connector_loop(state.clone(), port));
 
     let control = Router::new()
@@ -198,7 +203,7 @@ async fn run_daemon() -> AnyResult<()> {
         .route("/local/register", post(register))
         .route("/local/unregister", post(unregister))
         .route("/local/list", get(list))
-        .route("/local/seed", post(local_seed))
+        .route("/local/peer", post(local_peer))
         .route("/local/send", post(local_send))
         .route("/local/request", post(local_request))
         .route("/local/reply", post(local_reply))
@@ -335,9 +340,9 @@ async fn list(AxumState(state): AxumState<AppState>) -> Json<Value> {
     Json(json!({"local": local, "remote": remote, "peers": peers, "self": inner.advertise}))
 }
 
-async fn local_seed(
+async fn local_peer(
     AxumState(state): AxumState<AppState>,
-    Json(req): Json<SeedReq>,
+    Json(req): Json<PeerReq>,
 ) -> impl IntoResponse {
     {
         let mut inner = state.inner.lock().await;
@@ -611,7 +616,7 @@ fn announce_response(inner: &Inner) -> Json<AnnounceResp> {
     })
 }
 
-async fn seed_loop(state: AppState) {
+async fn peer_loop(state: AppState) {
     loop {
         prune_stale_local_agents(&state).await;
         let peers = {
@@ -778,6 +783,44 @@ fn machine_name() -> String {
         .unwrap_or_else(|| "machine".into())
 }
 
+fn cli_peers(args: &[String]) -> Vec<String> {
+    let mut peers = Vec::new();
+    let mut i = 1;
+    while i < args.len() {
+        if args[i] == "--peer" || args[i] == "peer" {
+            if let Some(peer) = args.get(i + 1) {
+                peers.push(peer.clone());
+                i += 1;
+            }
+        }
+        i += 1;
+    }
+    if let Ok(env_peers) = env::var("PI_MESH_PEERS") {
+        peers.extend(
+            env_peers
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
+        );
+    }
+    peers
+}
+
+fn read_peer_file() -> Vec<String> {
+    let Some(home) = env::var_os("HOME") else {
+        return vec![];
+    };
+    let path = PathBuf::from(home).join(".pi/mesh/peers");
+    let Ok(text) = fs::read_to_string(path) else {
+        return vec![];
+    };
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(ToString::to_string)
+        .collect()
+}
+
 fn self_check() {
     let line = r#"{"type":"peer","addr":"127.0.0.1:7373"}"#;
     let event: ConnectorEvent = serde_json::from_str(line).unwrap();
@@ -792,5 +835,18 @@ mod tests {
     #[test]
     fn parses_connector_peer_event() {
         self_check();
+    }
+
+    #[test]
+    fn parses_cli_peers() {
+        let args = vec![
+            "pi-mesh".to_string(),
+            "daemon".to_string(),
+            "--peer".to_string(),
+            "one:7373".to_string(),
+            "peer".to_string(),
+            "two:7373".to_string(),
+        ];
+        assert_eq!(cli_peers(&args), vec!["one:7373", "two:7373"]);
     }
 }
