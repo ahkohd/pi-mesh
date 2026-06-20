@@ -1,0 +1,42 @@
+{
+  "name": "@ahkohd/pi-mesh",
+  "version": "0.1.0",
+  "description": "P2P Pi agent mesh with pluggable discovery connectors.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ahkohd/pi-mesh.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ahkohd/pi-mesh/issues"
+  },
+  "homepage": "https://github.com/ahkohd/pi-mesh#readme",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "pi": {
+    "extensions": ["./dist/index.js"]
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "cargo test && npm run typecheck",
+    "pack:dry": "npm pack --dry-run"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.78.0",
+    "typebox": "^1.1.38"
+  },
+  "devDependencies": {
+    "@types/node": "^25.8.0",
+    "typescript": "^6.0.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
