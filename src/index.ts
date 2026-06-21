@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { keyHint, truncateToVisualLines, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -162,6 +162,9 @@ export default function (pi: ExtensionAPI) {
       to: Type.String({ description: "Target agent id or alias, e.g. clever-otter@mbp" }),
       message: Type.String({ description: "Message to send" }),
     }),
+    renderCall(params, theme, context) {
+      return textComponent(outgoingPreview("send to", params.to, params.message, context.expanded, theme), context.expanded);
+    },
     async execute(_id, params) {
       if (!agentId) throw new Error("mesh is off; run /mesh on");
       await post("/local/send", { from: agentId, to: params.to, body: params.message });
@@ -178,6 +181,9 @@ export default function (pi: ExtensionAPI) {
       message: Type.String({ description: "Request text" }),
       timeout_seconds: Type.Optional(Type.Number({ description: "Timeout seconds, default 30" })),
     }),
+    renderCall(params, theme, context) {
+      return textComponent(outgoingPreview("request to", params.to, params.message, context.expanded, theme), context.expanded);
+    },
     async execute(_id, params) {
       if (!agentId) throw new Error("mesh is off; run /mesh on");
       const timeoutMs = Math.max(1, params.timeout_seconds ?? 30) * 1000;
@@ -415,6 +421,27 @@ function formatIncoming(msg: MeshMsg) {
     return `pi-mesh request from ${from}${id}\n\n${text}\n\nReply normally. Your final answer will be returned to ${from}.`;
   }
   return `pi-mesh message from ${from}${id}\n\n${text}`;
+}
+
+function outgoingPreview(action: string, to: string, message: string, expanded: boolean, theme?: any) {
+  return `${action} ${theme?.fg?.("accent", to) ?? to}\n${expanded ? message : trimPreview(message)}`;
+}
+
+function trimPreview(text: string) {
+  if (text.length <= 800) return text;
+  return `${text.slice(0, 800)}... (${text.length - 800} more chars, ${keyHint("app.tools.expand", "to expand")})`;
+}
+
+function textComponent(text: string, expanded: boolean) {
+  return {
+    render: (width: number) => {
+      const lines = truncateToVisualLines(text, Number.MAX_SAFE_INTEGER, Math.max(1, width)).visualLines;
+      if (expanded || lines.length <= 12) return lines;
+      const hint = `... (${lines.length - 12} more lines, ${keyHint("app.tools.expand", "to expand")})`;
+      return [...lines.slice(0, 12), ...truncateToVisualLines(hint, 1, Math.max(1, width)).visualLines];
+    },
+    invalidate: () => undefined,
+  };
 }
 
 function agentLabel(agent: AgentInfo) {
