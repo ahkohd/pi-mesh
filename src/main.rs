@@ -495,7 +495,9 @@ async fn control_post_with_timeout(path: &str, body: Value, timeout: Duration) -
 
 fn control_send_error(error: reqwest::Error) -> Box<dyn std::error::Error + Send + Sync> {
     if error.is_connect() {
-        return boxed_error("service is not running; run `pi-mesh start`, `pi --mesh-on`, or `/mesh on` in Pi");
+        return boxed_error(
+            "service is not running; run `pi-mesh start`, `pi --mesh-on`, or `/mesh on` in Pi",
+        );
     }
     Box::new(error)
 }
