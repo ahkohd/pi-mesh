@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    env, fs,
+    env, fs, io,
     net::{IpAddr, SocketAddr},
     path::PathBuf,
     sync::Arc,
@@ -141,19 +141,177 @@ struct ConnectorEvent {
     addr: Option<String>,
 }
 
-#[tokio::main]
-async fn main() -> AnyResult<()> {
-    let args: Vec<String> = env::args().collect();
-    if args.get(1).is_some_and(|x| x == "self-check") {
-        self_check();
-        return Ok(());
-    }
+struct Cli {
+    json: bool,
+    args: Vec<String>,
+}
 
-    run_daemon().await?;
+#[derive(Debug, PartialEq)]
+struct MessageArgs {
+    from: String,
+    to: String,
+    message: String,
+    timeout_seconds: Option<u64>,
+}
+
+#[tokio::main]
+async fn main() {
+    if let Err(error) = try_main().await {
+        eprintln!("pi-mesh: {error}");
+        std::process::exit(1);
+    }
+}
+
+async fn try_main() -> AnyResult<()> {
+    let raw_args: Vec<String> = env::args().skip(1).collect();
+    let cli = parse_cli(&raw_args);
+    let rest = if cli.args.len() > 1 {
+        &cli.args[1..]
+    } else {
+        &[]
+    };
+
+    match cli.args.first().map(String::as_str) {
+        None | Some("start") => command_start(optional_peer(rest)?, cli.json).await?,
+        Some("daemon") => run_daemon(optional_peer(rest)?.into_iter().collect()).await?,
+        Some("stop") => command_stop(cli.json).await?,
+        Some("status") => command_status(cli.json).await?,
+        Some("list") => command_list(cli.json).await?,
+        Some("peer") => command_peer(required_arg(rest, "peer <addr>")?, cli.json).await?,
+        Some("send") => command_send(parse_message_args(rest, false)?, cli.json).await?,
+        Some("request") => command_request(parse_message_args(rest, true)?, cli.json).await?,
+        Some("version") => command_version(),
+        Some("self-check") => self_check(),
+        Some("help" | "-h" | "--help") => print_usage(),
+        Some(cmd) => {
+            print_usage();
+            return Err(boxed_error(format!("unknown command: {cmd}")));
+        }
+    }
     Ok(())
 }
 
-async fn run_daemon() -> AnyResult<()> {
+async fn command_start(peer: Option<String>, json_output: bool) -> AnyResult<()> {
+    if control_get("/health").await.is_ok() {
+        if let Some(peer) = peer.as_deref() {
+            add_peer(peer).await?;
+        }
+        if json_output {
+            print_json(json!({"ok": true, "running": true, "already_running": true, "peer": peer}));
+        } else {
+            println!("pi-mesh: already running");
+        }
+        return Ok(());
+    }
+
+    let peers: Vec<_> = peer.iter().cloned().collect();
+    if json_output {
+        print_json(json!({"ok": true, "running": true, "foreground": true, "peer": peer}));
+    }
+    run_daemon(peers).await
+}
+
+async fn command_stop(json_output: bool) -> AnyResult<()> {
+    ensure_loopback_control_url()?;
+    control_post("/local/shutdown", json!({})).await?;
+    if json_output {
+        print_json(json!({"ok": true, "stopped": true}));
+    } else {
+        println!("pi-mesh: stopped");
+    }
+    Ok(())
+}
+
+async fn command_status(json_output: bool) -> AnyResult<()> {
+    let health = control_get("/health").await?;
+    if json_output {
+        print_json(health);
+        return Ok(());
+    }
+    println!("pi-mesh: running");
+    println!(
+        "version: {}",
+        value_str(&health, "version").unwrap_or("unknown")
+    );
+    println!(
+        "protocol: {}",
+        health.get("protocol").unwrap_or(&Value::Null)
+    );
+    println!(
+        "machine: {}",
+        value_str(&health, "machine").unwrap_or("unknown")
+    );
+    println!(
+        "addr: {}",
+        value_str(&health, "advertise").unwrap_or("unknown")
+    );
+    Ok(())
+}
+
+async fn command_list(json_output: bool) -> AnyResult<()> {
+    let list = control_get("/local/list").await?;
+    if json_output {
+        print_json(list);
+    } else {
+        println!("{}", format_list(&list));
+    }
+    Ok(())
+}
+
+async fn command_peer(peer: &str, json_output: bool) -> AnyResult<()> {
+    add_peer(peer).await?;
+    if json_output {
+        print_json(json!({"ok": true, "peer": peer}));
+    } else {
+        println!("pi-mesh: peer added {peer}");
+    }
+    Ok(())
+}
+
+async fn command_send(args: MessageArgs, json_output: bool) -> AnyResult<()> {
+    let res = control_post(
+        "/local/send",
+        json!({"from": args.from, "to": args.to, "body": args.message}),
+    )
+    .await?;
+    if json_output {
+        print_json(res);
+    } else {
+        println!("sent to {}", args.to);
+    }
+    Ok(())
+}
+
+async fn command_request(args: MessageArgs, json_output: bool) -> AnyResult<()> {
+    let timeout_seconds = args.timeout_seconds.unwrap_or(30).max(1);
+    let res = control_post_with_timeout(
+        "/local/request",
+        json!({
+            "from": args.from,
+            "to": args.to,
+            "body": args.message,
+            "timeout_ms": timeout_seconds.saturating_mul(1000)
+        }),
+        Duration::from_secs(timeout_seconds.saturating_add(5)),
+    )
+    .await?;
+    if json_output {
+        print_json(res);
+    } else {
+        print_body(res.get("body").unwrap_or(&Value::Null));
+    }
+    Ok(())
+}
+
+fn command_version() {
+    println!("pi-mesh {VERSION}");
+}
+
+async fn add_peer(peer: &str) -> AnyResult<Value> {
+    control_post("/local/peer", json!({"addr": peer})).await
+}
+
+async fn run_daemon(peers: Vec<String>) -> AnyResult<()> {
     let machine = machine_name();
     let control_addr: SocketAddr = env::var("PI_MESH_CONTROL_ADDR")
         .unwrap_or_else(|_| CONTROL_ADDR.to_string())
@@ -172,7 +330,7 @@ async fn run_daemon() -> AnyResult<()> {
             machine: machine.clone(),
             local_agents: HashMap::new(),
             remote_agents: HashMap::new(),
-            peers: HashSet::new(),
+            peers: peers.into_iter().collect(),
             queues: HashMap::new(),
             waiters: HashMap::new(),
         })),
@@ -238,6 +396,124 @@ async fn bind_network() -> std::io::Result<(TcpListener, u16)> {
         std::io::ErrorKind::AddrInUse,
         "no free pi-mesh port",
     ))
+}
+
+fn control_base() -> String {
+    env::var("PI_MESH_CONTROL_URL").unwrap_or_else(|_| format!("http://{CONTROL_ADDR}"))
+}
+
+fn control_url(path: &str) -> String {
+    format!("{}{}", control_base().trim_end_matches('/'), path)
+}
+
+fn print_json(value: Value) {
+    println!("{value}");
+}
+
+fn print_body(value: &Value) {
+    if let Some(text) = value.as_str() {
+        println!("{text}");
+    } else {
+        println!("{value}");
+    }
+}
+
+async fn control_get(path: &str) -> AnyResult<Value> {
+    let resp = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()?
+        .get(control_url(path))
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        return Err(boxed_error(format!(
+            "control request failed: {}",
+            resp.status()
+        )));
+    }
+    Ok(resp.json().await?)
+}
+
+async fn control_post(path: &str, body: Value) -> AnyResult<Value> {
+    control_post_with_timeout(path, body, Duration::from_secs(5)).await
+}
+
+async fn control_post_with_timeout(path: &str, body: Value, timeout: Duration) -> AnyResult<Value> {
+    let resp = reqwest::Client::builder()
+        .timeout(timeout)
+        .build()?
+        .post(control_url(path))
+        .json(&body)
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        return Err(boxed_error(format!(
+            "control request failed: {}",
+            resp.text().await.unwrap_or_else(|_| "unknown error".into())
+        )));
+    }
+    Ok(resp.json().await?)
+}
+
+fn ensure_loopback_control_url() -> AnyResult<()> {
+    let url = reqwest::Url::parse(&control_base())?;
+    let Some(host) = url.host_str() else {
+        return Err(boxed_error("control URL has no host"));
+    };
+    if host == "localhost" {
+        return Ok(());
+    }
+    if host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback()) {
+        return Ok(());
+    }
+    Err(boxed_error(format!(
+        "refusing to stop non-loopback control URL: {url}"
+    )))
+}
+
+fn value_str<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+    value.get(key).and_then(Value::as_str)
+}
+
+fn format_list(list: &Value) -> String {
+    let local = format_agents(list, "local");
+    let remote = format_agents(list, "remote");
+    let peers = list
+        .get("peers")
+        .and_then(Value::as_array)
+        .map(|xs| {
+            xs.iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        })
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "none".into());
+    format!(
+        "service: {}\nlocal:\n  {local}\nremote:\n  {remote}\npeers:\n  {peers}",
+        value_str(list, "self").unwrap_or("unknown")
+    )
+}
+
+fn format_agents(list: &Value, key: &str) -> String {
+    list.get(key)
+        .and_then(Value::as_array)
+        .map(|agents| {
+            agents
+                .iter()
+                .map(|agent| {
+                    format!(
+                        "{} ({}) {}",
+                        value_str(agent, "alias").unwrap_or("unknown"),
+                        value_str(agent, "id").unwrap_or("unknown"),
+                        value_str(agent, "addr").unwrap_or("unknown")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        })
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "none".into())
 }
 
 async fn health(AxumState(state): AxumState<AppState>) -> Json<Value> {
@@ -821,6 +1097,114 @@ fn machine_name() -> String {
         .unwrap_or_else(|| "machine".into())
 }
 
+fn parse_cli(args: &[String]) -> Cli {
+    let mut json = false;
+    let mut version = false;
+    let mut out = Vec::new();
+
+    for arg in args {
+        match arg.as_str() {
+            "--json" => json = true,
+            "--version" | "-V" => version = true,
+            _ => out.push(arg.clone()),
+        }
+    }
+
+    if version {
+        out.clear();
+        out.push("version".into());
+    }
+
+    Cli { json, args: out }
+}
+
+fn parse_message_args(args: &[String], allow_timeout: bool) -> AnyResult<MessageArgs> {
+    let mut from =
+        env::var("PI_MESH_CLI_NAME").unwrap_or_else(|_| format!("cli@{}", machine_name()));
+    let mut timeout_seconds = None;
+    let mut positionals = Vec::new();
+    let mut i = 0;
+
+    while i < args.len() {
+        match args[i].as_str() {
+            "--from" => {
+                let Some(value) = args.get(i + 1) else {
+                    return Err(boxed_error("--from requires a name"));
+                };
+                from = value.clone();
+                i += 2;
+            }
+            "--timeout" => {
+                if !allow_timeout {
+                    return Err(boxed_error("--timeout is only supported for request"));
+                }
+                let Some(value) = args.get(i + 1) else {
+                    return Err(boxed_error("--timeout requires seconds"));
+                };
+                timeout_seconds = Some(value.parse()?);
+                i += 2;
+            }
+            value => {
+                positionals.push(value.to_string());
+                i += 1;
+            }
+        }
+    }
+
+    if positionals.len() < 2 {
+        let command = if allow_timeout { "request" } else { "send" };
+        return Err(boxed_error(format!(
+            "usage: pi-mesh {command} <to> <message>"
+        )));
+    }
+
+    Ok(MessageArgs {
+        from,
+        to: positionals[0].clone(),
+        message: positionals[1..].join(" "),
+        timeout_seconds,
+    })
+}
+
+fn optional_peer(args: &[String]) -> AnyResult<Option<String>> {
+    match args {
+        [] => Ok(None),
+        [peer] => Ok(Some(peer.clone())),
+        _ => Err(boxed_error("usage: pi-mesh start [peer]")),
+    }
+}
+
+fn required_arg<'a>(args: &'a [String], usage: &str) -> AnyResult<&'a str> {
+    match args {
+        [value] => Ok(value),
+        _ => Err(boxed_error(format!("usage: pi-mesh {usage}"))),
+    }
+}
+
+fn print_usage() {
+    println!(
+        "Usage:
+  pi-mesh start [peer]
+  pi-mesh stop
+  pi-mesh status
+  pi-mesh list
+  pi-mesh peer <addr>
+  pi-mesh send <to> <message>
+  pi-mesh request <to> <message>
+  pi-mesh version
+
+Options:
+  --json
+  --version
+  --from <name>
+  --timeout <seconds>"
+    );
+}
+
+fn boxed_error(message: impl Into<String>) -> Box<dyn std::error::Error + Send + Sync> {
+    Box::new(io::Error::other(message.into()))
+}
+
 fn self_check() {
     let line = r#"{"type":"peer","addr":"127.0.0.1:7373"}"#;
     let event: ConnectorEvent = serde_json::from_str(line).unwrap();
@@ -835,5 +1219,61 @@ mod tests {
     #[test]
     fn parses_connector_peer_event() {
         self_check();
+    }
+
+    #[test]
+    fn parses_optional_peer() {
+        assert_eq!(optional_peer(&[]).unwrap(), None);
+        assert_eq!(
+            optional_peer(&["one:7373".to_string()]).unwrap(),
+            Some("one:7373".into())
+        );
+        assert!(optional_peer(&["one:7373".to_string(), "two:7373".to_string()]).is_err());
+    }
+
+    #[test]
+    fn parses_global_flags() {
+        let cli = parse_cli(&[
+            "--json".to_string(),
+            "status".to_string(),
+            "--version".to_string(),
+        ]);
+        assert!(cli.json);
+        assert_eq!(cli.args, vec!["version"]);
+
+        let cli = parse_cli(&["list".to_string(), "--json".to_string()]);
+        assert!(cli.json);
+        assert_eq!(cli.args, vec!["list"]);
+    }
+
+    #[test]
+    fn parses_message_args() {
+        let args = vec![
+            "--from".to_string(),
+            "ops@machine".to_string(),
+            "target@machine".to_string(),
+            "hello".to_string(),
+            "there".to_string(),
+        ];
+        assert_eq!(
+            parse_message_args(&args, false).unwrap(),
+            MessageArgs {
+                from: "ops@machine".into(),
+                to: "target@machine".into(),
+                message: "hello there".into(),
+                timeout_seconds: None,
+            }
+        );
+
+        let args = vec![
+            "target@machine".to_string(),
+            "status?".to_string(),
+            "--timeout".to_string(),
+            "60".to_string(),
+        ];
+        let parsed = parse_message_args(&args, true).unwrap();
+        assert_eq!(parsed.to, "target@machine");
+        assert_eq!(parsed.message, "status?");
+        assert_eq!(parsed.timeout_seconds, Some(60));
     }
 }

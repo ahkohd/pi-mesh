@@ -131,6 +131,40 @@ curl http://127.0.0.1:7372/health
 curl http://127.0.0.1:7372/local/list
 ```
 
+## CLI
+
+From a terminal or SSH session, use the service CLI:
+
+```bash
+pi-mesh start [peer]
+pi-mesh status
+pi-mesh list
+pi-mesh peer 100.64.0.8:7373
+pi-mesh send clever-otter@mbp "hello from ssh"
+pi-mesh request clever-otter@mbp "what are you working on?"
+pi-mesh stop
+pi-mesh version
+```
+
+Add `--json` to commands that return status or data:
+
+```bash
+pi-mesh --json status
+pi-mesh list --json
+pi-mesh request clever-otter@mbp "status?" --timeout 60 --json
+```
+
+CLI messages are sent as `cli@machine` by default. Use `--from name@machine` to override it.
+
+For a container or any host without Pi:
+
+```bash
+npm install -g @ahkohd/pi-mesh
+pi-mesh start
+```
+
+Then use the `pi-mesh` CLI to reach remote Pi agents.
+
 ## Known peers
 
 Known peers are service addresses in `host:port` form.
@@ -138,6 +172,8 @@ Known peers are service addresses in `host:port` form.
 Sources:
 
 - `/mesh on host:port`
+- `pi-mesh start host:port`
+- `pi-mesh peer host:port`
 - connector discovery events
 
 ## Connectors
@@ -180,27 +216,6 @@ Inbound `/msg` and `/announce` requests are rejected unless they come from loopb
 Connector docs:
 
 - [Tailscale](docs/connectors/tailscale.md)
-
-## MCP
-
-Local MCP clients can use `pi-mesh-mcp` over stdio:
-
-```json
-{
-  "mcpServers": {
-    "pi-mesh": { "command": "pi-mesh-mcp" }
-  }
-}
-```
-
-For a container or any host without Pi:
-
-```bash
-npm install -g @ahkohd/pi-mesh
-pi-mesh daemon
-```
-
-Then `pi-mesh-mcp` can route to remote Pi agents through the mesh.
 
 ## Configuration
 
