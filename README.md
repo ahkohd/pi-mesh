@@ -142,6 +142,10 @@ curl http://127.0.0.1:7372/local/list
 From a terminal or SSH session, use the service CLI:
 
 ```bash
+npm install -g @ahkohd/pi-mesh
+```
+
+```bash
 pi-mesh start [peer]
 pi-mesh status
 pi-mesh list
@@ -166,7 +170,6 @@ CLI messages are sent as `cli@machine` by default. Use `--from name@machine` to 
 For a container or any host without Pi:
 
 ```bash
-npm install -g @ahkohd/pi-mesh
 pi-mesh start
 ```
 

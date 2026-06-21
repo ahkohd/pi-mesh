@@ -460,7 +460,8 @@ async fn control_get(path: &str) -> AnyResult<Value> {
         .build()?
         .get(control_url(path))
         .send()
-        .await?;
+        .await
+        .map_err(control_send_error)?;
     if !resp.status().is_success() {
         return Err(boxed_error(format!(
             "control request failed: {}",
@@ -481,7 +482,8 @@ async fn control_post_with_timeout(path: &str, body: Value, timeout: Duration) -
         .post(control_url(path))
         .json(&body)
         .send()
-        .await?;
+        .await
+        .map_err(control_send_error)?;
     if !resp.status().is_success() {
         return Err(boxed_error(format!(
             "control request failed: {}",
@@ -489,6 +491,13 @@ async fn control_post_with_timeout(path: &str, body: Value, timeout: Duration) -
         )));
     }
     Ok(resp.json().await?)
+}
+
+fn control_send_error(error: reqwest::Error) -> Box<dyn std::error::Error + Send + Sync> {
+    if error.is_connect() {
+        return boxed_error("service is not running; run `pi-mesh start`, `pi --mesh-on`, or `/mesh on` in Pi");
+    }
+    Box::new(error)
 }
 
 fn ensure_loopback_control_url() -> AnyResult<()> {
