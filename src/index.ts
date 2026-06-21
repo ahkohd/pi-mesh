@@ -13,6 +13,7 @@ const PROTOCOL_VERSION = 1;
 const requireFromHere = createRequire(import.meta.url);
 const BIN = process.env.PI_MESH_BIN ?? bundledBin("pi-mesh") ?? "pi-mesh";
 const ALIASES = join(appDataDir(), "pi-mesh", "aliases.json");
+const STATE_ENTRY = "pi-mesh-state";
 const ADJ = [
   "brave", "calm", "clever", "cosmic", "curious", "dapper", "dusty", "fuzzy", "gentle", "glad",
   "golden", "happy", "honest", "jolly", "lazy", "lucky", "neon", "nimble", "quiet", "rapid",
@@ -32,6 +33,8 @@ type MeshMsg = {
   body: unknown;
 };
 
+type MeshState = { on?: boolean; peer?: string };
+
 let agentId: string | undefined;
 let agentAlias: string | undefined;
 let agentTitle: string | undefined;
@@ -40,6 +43,22 @@ let heartbeat: NodeJS.Timeout | undefined;
 let pendingReplyIds: string[] = [];
 
 export default function (pi: ExtensionAPI) {
+  pi.registerFlag("mesh-on", {
+    description: "Start pi-mesh for this session",
+    type: "boolean",
+    default: false,
+  });
+
+  pi.on("session_start", async (_event, ctx) => {
+    const state = persistedMeshState(ctx);
+    if (!pi.getFlag("mesh-on") && !state.on) return;
+    try {
+      await turnMeshOn(pi, ctx, state.peer);
+    } catch (error) {
+      ctx.ui.notify(`mesh on failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+    }
+  });
+
   pi.registerCommand("mesh", {
     description: "pi-mesh: /mesh on [peer], /mesh off, /mesh list, /mesh alias [name]",
     handler: async (args, ctx) => {
@@ -48,11 +67,13 @@ export default function (pi: ExtensionAPI) {
 
       if (cmd === "on") {
         await turnMeshOn(pi, ctx, rest);
+        saveMeshState(pi, true, rest);
         ctx.ui.notify(`mesh on: ${agentAlias} (${agentId})`, "info");
         return;
       }
 
       if (cmd === "off") {
+        saveMeshState(pi, false);
         await meshOff();
         ctx.ui.notify("mesh off", "info");
         return;
@@ -91,6 +112,7 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       await turnMeshOn(pi, ctx, params.peer);
+      saveMeshState(pi, true, params.peer);
       return { content: [{ type: "text", text: await agentListText() }], details: currentAgent() ?? {} };
     },
   });
@@ -101,6 +123,7 @@ export default function (pi: ExtensionAPI) {
     description: "Unregister this Pi session from pi-mesh.",
     parameters: Type.Object({}),
     async execute() {
+      saveMeshState(pi, false);
       await meshOff();
       return { content: [{ type: "text", text: "mesh off" }], details: {} };
     },
@@ -290,6 +313,18 @@ async function meshOff() {
   agentAlias = undefined;
   agentTitle = undefined;
   pendingReplyIds = [];
+}
+
+function saveMeshState(pi: ExtensionAPI, on: boolean, peer?: string) {
+  pi.appendEntry(STATE_ENTRY, { on, peer });
+}
+
+function persistedMeshState(ctx: any): MeshState {
+  const entries = ctx.sessionManager?.getBranch?.() ?? ctx.sessionManager?.getEntries?.() ?? [];
+  for (const entry of [...entries].reverse()) {
+    if (entry.type === "custom" && entry.customType === STATE_ENTRY) return (entry.data ?? {}) as MeshState;
+  }
+  return {};
 }
 
 function currentTitle(pi: ExtensionAPI) {

@@ -116,6 +116,12 @@ To join through a known peer:
 /mesh on 100.64.0.8:7373
 ```
 
+For one-shot auto-start from the terminal:
+
+```bash
+pi --mesh-on
+```
+
 On startup it prints the local control address, the network listen address, and the address it advertises to peers:
 
 ```text
