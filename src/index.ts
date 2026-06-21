@@ -9,7 +9,7 @@ import { basename, delimiter, dirname, join } from "node:path";
 import { homedir, hostname } from "node:os";
 
 const CONTROL = process.env.PI_MESH_CONTROL_URL ?? "http://127.0.0.1:7372";
-const PROTOCOL_VERSION = 2;
+const PROTOCOL_VERSION = 3;
 const requireFromHere = createRequire(import.meta.url);
 const BIN = process.env.PI_MESH_BIN ?? bundledBin("pi-mesh") ?? "pi-mesh";
 const ALIASES = join(appDataDir(), "pi-mesh", "aliases.json");
@@ -29,6 +29,7 @@ type AgentInfo = {
   id: string;
   alias: string;
   title?: string;
+  cwd: string;
   runtime?: any;
 };
 
@@ -46,6 +47,7 @@ type MeshState = { on?: boolean; peer?: string };
 let agentId: string | undefined;
 let agentAlias: string | undefined;
 let agentTitle: string | undefined;
+let agentCwd = middlePath(process.cwd());
 let agentRuntime: Record<string, unknown> | undefined;
 let pollAbort: AbortController | undefined;
 let heartbeat: NodeJS.Timeout | undefined;
@@ -215,6 +217,7 @@ async function turnMeshOn(pi: ExtensionAPI, ctx: any, peer?: string) {
   agentId = id;
   agentAlias = alias;
   agentTitle = currentTitle(pi);
+  agentCwd = currentCwd(ctx);
   agentRuntime = currentRuntime(ctx);
   await ensureDaemon();
   if (peer) await post("/local/peer", { addr: peer });
@@ -287,7 +290,7 @@ async function daemonCompatible() {
 
 async function registerSelf() {
   if (!agentId || !agentAlias) return;
-  await post("/local/register", { id: agentId, alias: agentAlias, title: agentTitle, runtime: agentRuntime });
+  await post("/local/register", { id: agentId, alias: agentAlias, title: agentTitle, cwd: agentCwd, runtime: agentRuntime });
 }
 
 function startPolling(pi: ExtensionAPI, id: string) {
@@ -315,6 +318,7 @@ function startHeartbeat(pi: ExtensionAPI, ctx: any) {
   clearInterval(heartbeat);
   heartbeat = setInterval(() => {
     agentTitle = currentTitle(pi);
+    agentCwd = currentCwd(ctx);
     agentRuntime = currentRuntime(ctx);
     void registerSelf().catch(() => undefined);
   }, 1_000);
@@ -325,10 +329,11 @@ async function meshOff() {
   pollAbort = undefined;
   clearInterval(heartbeat);
   heartbeat = undefined;
-  if (agentId && agentAlias) await post("/local/unregister", { id: agentId, alias: agentAlias }).catch(() => undefined);
+  if (agentId) await post("/local/unregister", { id: agentId }).catch(() => undefined);
   agentId = undefined;
   agentAlias = undefined;
   agentTitle = undefined;
+  agentCwd = middlePath(process.cwd());
   agentRuntime = undefined;
   pendingReplyIds = [];
 }
@@ -347,6 +352,24 @@ function persistedMeshState(ctx: any): MeshState {
 
 function currentTitle(pi: ExtensionAPI) {
   return pi.getSessionName()?.trim() || undefined;
+}
+
+function currentCwd(ctx: any) {
+  return middlePath(typeof ctx.cwd === "string" ? ctx.cwd : process.cwd());
+}
+
+function middlePath(path: string, max = 40) {
+  const home = homedir().replace(/\\/g, "/");
+  const normalized = path.replace(/\\/g, "/");
+  const p = home && normalized === home
+    ? "~"
+    : home && normalized.startsWith(`${home}/`)
+      ? `~/${normalized.slice(home.length + 1)}`
+      : normalized;
+  if (p.length <= max) return p;
+  const root = p.startsWith("~/") ? `~/${p.split("/")[1]}` : p.split("/").slice(0, 2).join("/") || p;
+  const leaf = basename(p).slice(-Math.max(8, max - root.length - 5));
+  return `${root}/.../${leaf}`;
 }
 
 function currentRuntime(ctx: any) {
@@ -445,7 +468,7 @@ function textComponent(text: string, expanded: boolean) {
 }
 
 function agentLabel(agent: AgentInfo) {
-  return `${agent.alias}${agent.title ? ` - ${agent.title}` : ""}${runtimeLabel(agent)}`;
+  return `${agent.alias}${agent.title ? ` - ${agent.title}` : ""} ${agent.cwd}${runtimeLabel(agent)}`;
 }
 
 function lastAssistantText(messages: any[]) {
@@ -468,18 +491,18 @@ async function agentListText() {
 }
 
 function currentAgent() {
-  return agentId && agentAlias ? { id: agentId, alias: agentAlias, title: agentTitle, runtime: agentRuntime } : undefined;
+  return agentId && agentAlias ? { id: agentId, alias: agentAlias, title: agentTitle, cwd: agentCwd, runtime: agentRuntime } : undefined;
 }
 
 function meshOffText() {
   return "current: mesh off (this Pi session is not registered)";
 }
 
-function formatList(list: any, current?: { id: string; alias: string; title?: string; runtime?: any }) {
-  const show = (x: any) => `${x.alias}${x.title ? ` - ${x.title}` : ""}${runtimeLabel(x)} (${x.id}) ${x.addr}${current?.id === x.id ? " [me]" : ""}`;
+function formatList(list: any, current?: AgentInfo) {
+  const show = (x: any) => `${agentLabel(x)} (${x.id}) ${x.addr}${current?.id === x.id ? " [me]" : ""}`;
   const local = (list.local ?? []).map(show).join("\n  ") || "none";
   const remote = (list.remote ?? []).map(show).join("\n  ") || "none";
-  const me = current ? `${current.alias}${current.title ? ` - ${current.title}` : ""}${runtimeLabel(current)} (${current.id})` : "mesh off (this Pi session is not registered)";
+  const me = current ? `${agentLabel(current)} (${current.id})` : "mesh off (this Pi session is not registered)";
   return `current: ${me}\nservice: ${list.self}\nlocal:\n  ${local}\nremote:\n  ${remote}`;
 }
 

@@ -26,7 +26,7 @@ use uuid::Uuid;
 const CONTROL_ADDR: &str = "127.0.0.1:7372";
 const START_PORT: u16 = 7373;
 const END_PORT: u16 = 7399;
-const PROTOCOL_VERSION: u32 = 2;
+const PROTOCOL_VERSION: u32 = 3;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 type AnyResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -52,6 +52,7 @@ struct Inner {
 struct LocalAgent {
     alias: String,
     title: Option<String>,
+    cwd: String,
     runtime: Option<Value>,
     last_seen: Instant,
 }
@@ -60,6 +61,7 @@ struct LocalAgent {
 struct RemoteAgent {
     alias: String,
     title: Option<String>,
+    cwd: String,
     runtime: Option<Value>,
     addr: String,
 }
@@ -79,6 +81,7 @@ struct AgentInfo {
     id: String,
     alias: String,
     title: Option<String>,
+    cwd: String,
     runtime: Option<Value>,
     addr: String,
 }
@@ -88,7 +91,13 @@ struct RegisterReq {
     id: String,
     alias: String,
     title: Option<String>,
+    cwd: String,
     runtime: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UnregisterReq {
+    id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -523,6 +532,21 @@ fn value_str<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value.get(key).and_then(Value::as_str)
 }
 
+fn display_cwd() -> String {
+    let cwd = env::current_dir()
+        .ok()
+        .map(|p| p.display().to_string().replace('\\', "/"))
+        .unwrap_or_else(|| ".".into());
+    let home = env::var("HOME").unwrap_or_default().replace('\\', "/");
+    if !home.is_empty() && cwd == home {
+        "~".into()
+    } else if !home.is_empty() && cwd.starts_with(&format!("{home}/")) {
+        format!("~/{}", &cwd[home.len() + 1..])
+    } else {
+        cwd
+    }
+}
+
 fn runtime_label(agent: &Value) -> String {
     let Some(runtime) = agent.get("runtime") else {
         return String::new();
@@ -572,10 +596,14 @@ fn format_agents(list: &Value, key: &str) -> String {
                     let title = value_str(agent, "title")
                         .map(|title| format!(" - {title}"))
                         .unwrap_or_default();
+                    let cwd = value_str(agent, "cwd")
+                        .map(|cwd| format!(" {cwd}"))
+                        .unwrap_or_default();
                     format!(
-                        "{}{}{} ({}) {}",
+                        "{}{}{}{} ({}) {}",
                         value_str(agent, "alias").unwrap_or("unknown"),
                         title,
+                        cwd,
                         runtime_label(agent),
                         value_str(agent, "id").unwrap_or("unknown"),
                         value_str(agent, "addr").unwrap_or("unknown")
@@ -608,6 +636,7 @@ async fn health_payload(state: &AppState) -> Value {
             id: id.clone(),
             alias: agent.alias.clone(),
             title: agent.title.clone(),
+            cwd: agent.cwd.clone(),
             runtime: agent.runtime.clone(),
             addr: inner.advertise.clone(),
         }).collect::<Vec<_>>(),
@@ -615,6 +644,7 @@ async fn health_payload(state: &AppState) -> Value {
             id: id.clone(),
             alias: agent.alias.clone(),
             title: agent.title.clone(),
+            cwd: agent.cwd.clone(),
             runtime: agent.runtime.clone(),
             addr: agent.addr.clone(),
         }).collect::<Vec<_>>(),
@@ -654,6 +684,7 @@ async fn register(
         LocalAgent {
             alias: req.alias.clone(),
             title: req.title.clone(),
+            cwd: req.cwd.clone(),
             runtime: req.runtime.clone(),
             last_seen: Instant::now(),
         },
@@ -665,7 +696,7 @@ async fn register(
 
 async fn unregister(
     AxumState(state): AxumState<AppState>,
-    Json(req): Json<RegisterReq>,
+    Json(req): Json<UnregisterReq>,
 ) -> impl IntoResponse {
     let mut inner = state.inner.lock().await;
     inner.local_agents.remove(&req.id);
@@ -679,12 +710,12 @@ async fn list(AxumState(state): AxumState<AppState>) -> Json<Value> {
     let local: Vec<_> = inner
         .local_agents
         .iter()
-        .map(|(id, agent)| json!({"id": id, "alias": agent.alias, "title": agent.title, "runtime": agent.runtime, "addr": inner.advertise}))
+        .map(|(id, agent)| json!({"id": id, "alias": agent.alias, "title": agent.title, "cwd": agent.cwd, "runtime": agent.runtime, "addr": inner.advertise}))
         .collect();
     let remote: Vec<_> = inner
         .remote_agents
         .iter()
-        .map(|(id, agent)| json!({"id": id, "alias": agent.alias, "title": agent.title, "runtime": agent.runtime, "addr": agent.addr}))
+        .map(|(id, agent)| json!({"id": id, "alias": agent.alias, "title": agent.title, "cwd": agent.cwd, "runtime": agent.runtime, "addr": agent.addr}))
         .collect();
     let peers: Vec<_> = inner.peers.iter().cloned().collect();
     Json(json!({"local": local, "remote": remote, "peers": peers, "self": inner.advertise}))
@@ -815,6 +846,7 @@ async fn announce(
                     RemoteAgent {
                         alias: agent.alias,
                         title: agent.title,
+                        cwd: agent.cwd,
                         runtime: agent.runtime,
                         addr: agent.addr,
                     },
@@ -977,6 +1009,7 @@ async fn resolve_agent_info(state: &AppState, from: &str) -> AgentInfo {
             id.as_str(),
             agent.alias.as_str(),
             agent.title.clone(),
+            agent.cwd.clone(),
             agent.runtime.clone(),
             inner.advertise.as_str(),
         );
@@ -986,6 +1019,7 @@ async fn resolve_agent_info(state: &AppState, from: &str) -> AgentInfo {
             id.as_str(),
             agent.alias.as_str(),
             agent.title.clone(),
+            agent.cwd.clone(),
             agent.runtime.clone(),
             agent.addr.as_str(),
         );
@@ -999,6 +1033,7 @@ async fn resolve_agent_info(state: &AppState, from: &str) -> AgentInfo {
             id.as_str(),
             agent.alias.as_str(),
             agent.title.clone(),
+            agent.cwd.clone(),
             agent.runtime.clone(),
             inner.advertise.as_str(),
         );
@@ -1012,6 +1047,7 @@ async fn resolve_agent_info(state: &AppState, from: &str) -> AgentInfo {
             id.as_str(),
             agent.alias.as_str(),
             agent.title.clone(),
+            agent.cwd.clone(),
             agent.runtime.clone(),
             agent.addr.as_str(),
         );
@@ -1023,6 +1059,7 @@ fn agent_info(
     id: impl Into<String>,
     alias: impl Into<String>,
     title: Option<String>,
+    cwd: String,
     runtime: Option<Value>,
     addr: impl Into<String>,
 ) -> AgentInfo {
@@ -1030,13 +1067,14 @@ fn agent_info(
         id: id.into(),
         alias: alias.into(),
         title,
+        cwd,
         runtime,
         addr: addr.into(),
     }
 }
 
 fn placeholder_agent_info(id: &str) -> AgentInfo {
-    agent_info(id, id, None, None, "")
+    agent_info(id, id, None, display_cwd(), None, "")
 }
 
 fn announce_response(inner: &Inner) -> Json<AnnounceResp> {
@@ -1047,6 +1085,7 @@ fn announce_response(inner: &Inner) -> Json<AnnounceResp> {
             id: id.clone(),
             alias: agent.alias.clone(),
             title: agent.title.clone(),
+            cwd: agent.cwd.clone(),
             runtime: agent.runtime.clone(),
             addr: inner.advertise.clone(),
         })
@@ -1055,6 +1094,7 @@ fn announce_response(inner: &Inner) -> Json<AnnounceResp> {
         id: id.clone(),
         alias: agent.alias.clone(),
         title: agent.title.clone(),
+        cwd: agent.cwd.clone(),
         runtime: agent.runtime.clone(),
         addr: agent.addr.clone(),
     }));
@@ -1125,6 +1165,7 @@ async fn announce_to_peer(state: &AppState, peer: &str) -> Result<(), String> {
                     id: id.clone(),
                     alias: agent.alias.clone(),
                     title: agent.title.clone(),
+                    cwd: agent.cwd.clone(),
                     runtime: agent.runtime.clone(),
                     addr: inner.advertise.clone(),
                 })
@@ -1168,6 +1209,7 @@ async fn announce_to_peer(state: &AppState, peer: &str) -> Result<(), String> {
                 RemoteAgent {
                     alias: agent.alias,
                     title: agent.title,
+                    cwd: agent.cwd,
                     runtime: agent.runtime,
                     addr: agent.addr,
                 },
@@ -1421,8 +1463,14 @@ mod tests {
     #[test]
     fn parses_agent_without_title() {
         let agent: AgentInfo =
-            serde_json::from_str(r#"{"id":"a","alias":"b","addr":"c"}"#).unwrap();
+            serde_json::from_str(r#"{"id":"a","alias":"b","cwd":"~","addr":"c"}"#).unwrap();
         assert_eq!(agent.title, None);
+    }
+
+    #[test]
+    fn parses_unregister_without_metadata() {
+        let req: UnregisterReq = serde_json::from_str(r#"{"id":"a"}"#).unwrap();
+        assert_eq!(req.id, "a");
     }
 
     #[test]
