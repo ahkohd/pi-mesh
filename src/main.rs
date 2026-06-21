@@ -26,7 +26,7 @@ use uuid::Uuid;
 const CONTROL_ADDR: &str = "127.0.0.1:7372";
 const START_PORT: u16 = 7373;
 const END_PORT: u16 = 7399;
-const PROTOCOL_VERSION: u32 = 1;
+const PROTOCOL_VERSION: u32 = 2;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 type AnyResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -71,6 +71,7 @@ struct MeshMessage {
     id: String,
     kind: String,
     body: Value,
+    from_agent: AgentInfo,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -705,12 +706,14 @@ async fn local_send(
     AxumState(state): AxumState<AppState>,
     Json(req): Json<LocalSendReq>,
 ) -> impl IntoResponse {
+    let from_agent = resolve_agent_info(&state, &req.from).await;
     let msg = MeshMessage {
         from: req.from,
         to: req.to,
         id: Uuid::new_v4().to_string(),
         kind: "send".into(),
         body: req.body,
+        from_agent,
     };
     match route_message(state, msg, Duration::from_secs(1)).await {
         Ok(_) => (StatusCode::OK, Json(json!({"ok": true}))).into_response(),
@@ -722,12 +725,14 @@ async fn local_request(
     AxumState(state): AxumState<AppState>,
     Json(req): Json<LocalRequestReq>,
 ) -> impl IntoResponse {
+    let from_agent = resolve_agent_info(&state, &req.from).await;
     let msg = MeshMessage {
         from: req.from,
         to: req.to,
         id: Uuid::new_v4().to_string(),
         kind: "request".into(),
         body: req.body,
+        from_agent,
     };
     match route_message(state, msg, Duration::from_millis(req.timeout_ms)).await {
         Ok(body) => (StatusCode::OK, Json(json!({"ok": true, "body": body}))).into_response(),
@@ -963,6 +968,75 @@ async fn resolve_remote(state: &AppState, to: &str) -> Option<RemoteAgent> {
         .iter()
         .find(|(_, agent)| agent.alias == to)
         .map(|(_, agent)| agent.clone())
+}
+
+async fn resolve_agent_info(state: &AppState, from: &str) -> AgentInfo {
+    let inner = state.inner.lock().await;
+    if let Some((id, agent)) = inner.local_agents.get_key_value(from) {
+        return agent_info(
+            id.as_str(),
+            agent.alias.as_str(),
+            agent.title.clone(),
+            agent.runtime.clone(),
+            inner.advertise.as_str(),
+        );
+    }
+    if let Some((id, agent)) = inner.remote_agents.get_key_value(from) {
+        return agent_info(
+            id.as_str(),
+            agent.alias.as_str(),
+            agent.title.clone(),
+            agent.runtime.clone(),
+            agent.addr.as_str(),
+        );
+    }
+    if let Some((id, agent)) = inner
+        .local_agents
+        .iter()
+        .find(|(_, agent)| agent.alias == from)
+    {
+        return agent_info(
+            id.as_str(),
+            agent.alias.as_str(),
+            agent.title.clone(),
+            agent.runtime.clone(),
+            inner.advertise.as_str(),
+        );
+    }
+    if let Some((id, agent)) = inner
+        .remote_agents
+        .iter()
+        .find(|(_, agent)| agent.alias == from)
+    {
+        return agent_info(
+            id.as_str(),
+            agent.alias.as_str(),
+            agent.title.clone(),
+            agent.runtime.clone(),
+            agent.addr.as_str(),
+        );
+    }
+    placeholder_agent_info(from)
+}
+
+fn agent_info(
+    id: impl Into<String>,
+    alias: impl Into<String>,
+    title: Option<String>,
+    runtime: Option<Value>,
+    addr: impl Into<String>,
+) -> AgentInfo {
+    AgentInfo {
+        id: id.into(),
+        alias: alias.into(),
+        title,
+        runtime,
+        addr: addr.into(),
+    }
+}
+
+fn placeholder_agent_info(id: &str) -> AgentInfo {
+    agent_info(id, id, None, None, "")
 }
 
 fn announce_response(inner: &Inner) -> Json<AnnounceResp> {

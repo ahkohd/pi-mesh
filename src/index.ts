@@ -9,7 +9,7 @@ import { basename, delimiter, dirname, join } from "node:path";
 import { homedir, hostname } from "node:os";
 
 const CONTROL = process.env.PI_MESH_CONTROL_URL ?? "http://127.0.0.1:7372";
-const PROTOCOL_VERSION = 1;
+const PROTOCOL_VERSION = 2;
 const requireFromHere = createRequire(import.meta.url);
 const BIN = process.env.PI_MESH_BIN ?? bundledBin("pi-mesh") ?? "pi-mesh";
 const ALIASES = join(appDataDir(), "pi-mesh", "aliases.json");
@@ -25,12 +25,20 @@ const NOUN = [
   "sloth", "sparrow", "tiger", "turtle", "weasel", "whale", "wombat", "yak", "zebra", "zorilla",
 ];
 
+type AgentInfo = {
+  id: string;
+  alias: string;
+  title?: string;
+  runtime?: any;
+};
+
 type MeshMsg = {
   from: string;
   to: string;
   id: string;
   kind: "send" | "request";
   body: unknown;
+  from_agent: AgentInfo;
 };
 
 type MeshState = { on?: boolean; peer?: string };
@@ -401,10 +409,16 @@ function slug(s: string) {
 
 function formatIncoming(msg: MeshMsg) {
   const text = typeof msg.body === "string" ? msg.body : JSON.stringify(msg.body);
+  const from = agentLabel(msg.from_agent);
+  const id = `\nid: ${msg.from_agent.id}`;
   if (msg.kind === "request") {
-    return `pi-mesh request from ${msg.from}:\n\n${text}\n\nReply normally. Your final answer will be returned to ${msg.from}.`;
+    return `pi-mesh request from ${from}${id}\n\n${text}\n\nReply normally. Your final answer will be returned to ${from}.`;
   }
-  return `pi-mesh message from ${msg.from}:\n\n${text}`;
+  return `pi-mesh message from ${from}${id}\n\n${text}`;
+}
+
+function agentLabel(agent: AgentInfo) {
+  return `${agent.alias}${agent.title ? ` - ${agent.title}` : ""}${runtimeLabel(agent)}`;
 }
 
 function lastAssistantText(messages: any[]) {
