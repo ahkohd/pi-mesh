@@ -318,7 +318,6 @@ function startHeartbeat(pi: ExtensionAPI, ctx: any) {
   clearInterval(heartbeat);
   heartbeat = setInterval(() => {
     agentTitle = currentTitle(pi);
-    agentCwd = currentCwd(ctx);
     agentRuntime = currentRuntime(ctx);
     void registerSelf().catch(() => undefined);
   }, 1_000);
