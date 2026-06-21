@@ -168,7 +168,7 @@ export default function (pi: ExtensionAPI) {
     async execute(_id, params) {
       if (!agentId) throw new Error("mesh is off; run /mesh on");
       await post("/local/send", { from: agentId, to: params.to, body: params.message });
-      return { content: [{ type: "text", text: `sent to ${params.to}` }], details: {} };
+      return { content: [{ type: "text", text: "sent" }], details: {} };
     },
   });
 
