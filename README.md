@@ -177,7 +177,7 @@ The connector replies:
 
 Inbound `/msg` and `/announce` requests are rejected unless they come from loopback, `PI_MESH_INSECURE=1` is set, or a connector allows the remote IP.
 
-Connector-specific docs:
+Connector docs:
 
 - [Tailscale](docs/connectors/tailscale.md)
 
