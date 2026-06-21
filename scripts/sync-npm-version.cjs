@@ -12,12 +12,6 @@ const PLATFORM_PACKAGES = [
   path.join(ROOT, "npm", "linux-arm64-gnu", "package.json"),
   path.join(ROOT, "npm", "linux-x64-gnu", "package.json"),
 ];
-const PLATFORM_DEPENDENCIES = [
-  "@ahkohd/pi-mesh-darwin-arm64",
-  "@ahkohd/pi-mesh-darwin-x64",
-  "@ahkohd/pi-mesh-linux-arm64-gnu",
-  "@ahkohd/pi-mesh-linux-x64-gnu",
-];
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -37,10 +31,6 @@ function readVersionFromCargoToml() {
 const version = process.argv[2] || readVersionFromCargoToml();
 const root = readJson(ROOT_PACKAGE);
 root.version = version;
-root.optionalDependencies = root.optionalDependencies || {};
-for (const name of PLATFORM_DEPENDENCIES) {
-  root.optionalDependencies[name] = version;
-}
 writeJson(ROOT_PACKAGE, root);
 
 for (const packagePath of PLATFORM_PACKAGES) {

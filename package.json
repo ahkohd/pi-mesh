@@ -44,12 +44,6 @@
     "@earendil-works/pi-coding-agent": "^0.78.0",
     "typebox": "^1.1.38"
   },
-  "optionalDependencies": {
-    "@ahkohd/pi-mesh-darwin-arm64": "0.1.6",
-    "@ahkohd/pi-mesh-darwin-x64": "0.1.6",
-    "@ahkohd/pi-mesh-linux-arm64-gnu": "0.1.6",
-    "@ahkohd/pi-mesh-linux-x64-gnu": "0.1.6"
-  },
   "devDependencies": {
     "@types/node": "^25.8.0",
     "typescript": "^6.0.3"

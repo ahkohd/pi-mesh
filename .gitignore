@@ -1,6 +1,7 @@
 target/
 node_modules/
 dist/
+config/mcporter.json
 .DS_Store
 npm/*/bin/pi-mesh
 npm/*/bin/pi-mesh-tailscale

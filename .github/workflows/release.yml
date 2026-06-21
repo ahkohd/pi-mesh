@@ -211,6 +211,7 @@ jobs:
 
           mkdir -p "${STAGE_DIR}/main"
           cp -R package.json README.md LICENSE.md bin dist "${STAGE_DIR}/main"
+          node scripts/add-platform-optional-deps.cjs "${STAGE_DIR}/main/package.json" "${{ needs.release.outputs.version }}"
 
           mkdir -p "${STAGE_DIR}/darwin-arm64"
           cp -R npm/darwin-arm64/. "${STAGE_DIR}/darwin-arm64"
