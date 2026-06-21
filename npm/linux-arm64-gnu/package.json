@@ -1,6 +1,6 @@
 {
   "name": "@ahkohd/pi-mesh-linux-arm64-gnu",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Prebuilt service binaries for @ahkohd/pi-mesh (linux arm64 glibc)",
   "license": "MIT",
   "repository": {
