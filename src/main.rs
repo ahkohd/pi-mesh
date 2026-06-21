@@ -51,12 +51,14 @@ struct Inner {
 
 struct LocalAgent {
     alias: String,
+    title: Option<String>,
     last_seen: Instant,
 }
 
 #[derive(Clone)]
 struct RemoteAgent {
     alias: String,
+    title: Option<String>,
     addr: String,
 }
 
@@ -73,6 +75,7 @@ struct MeshMessage {
 struct AgentInfo {
     id: String,
     alias: String,
+    title: Option<String>,
     addr: String,
 }
 
@@ -80,6 +83,7 @@ struct AgentInfo {
 struct RegisterReq {
     id: String,
     alias: String,
+    title: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -530,9 +534,13 @@ fn format_agents(list: &Value, key: &str) -> String {
             agents
                 .iter()
                 .map(|agent| {
+                    let title = value_str(agent, "title")
+                        .map(|title| format!(" - {title}"))
+                        .unwrap_or_default();
                     format!(
-                        "{} ({}) {}",
+                        "{}{} ({}) {}",
                         value_str(agent, "alias").unwrap_or("unknown"),
+                        title,
                         value_str(agent, "id").unwrap_or("unknown"),
                         value_str(agent, "addr").unwrap_or("unknown")
                     )
@@ -563,11 +571,13 @@ async fn health_payload(state: &AppState) -> Value {
         "local_agents": inner.local_agents.iter().map(|(id, agent)| AgentInfo {
             id: id.clone(),
             alias: agent.alias.clone(),
+            title: agent.title.clone(),
             addr: inner.advertise.clone(),
         }).collect::<Vec<_>>(),
         "remote_agents": inner.remote_agents.iter().map(|(id, agent)| AgentInfo {
             id: id.clone(),
             alias: agent.alias.clone(),
+            title: agent.title.clone(),
             addr: agent.addr.clone(),
         }).collect::<Vec<_>>(),
     })
@@ -605,6 +615,7 @@ async fn register(
         req.id.clone(),
         LocalAgent {
             alias: req.alias.clone(),
+            title: req.title.clone(),
             last_seen: Instant::now(),
         },
     );
@@ -629,12 +640,12 @@ async fn list(AxumState(state): AxumState<AppState>) -> Json<Value> {
     let local: Vec<_> = inner
         .local_agents
         .iter()
-        .map(|(id, agent)| json!({"id": id, "alias": agent.alias, "addr": inner.advertise}))
+        .map(|(id, agent)| json!({"id": id, "alias": agent.alias, "title": agent.title, "addr": inner.advertise}))
         .collect();
     let remote: Vec<_> = inner
         .remote_agents
         .iter()
-        .map(|(id, agent)| json!({"id": id, "alias": agent.alias, "addr": agent.addr}))
+        .map(|(id, agent)| json!({"id": id, "alias": agent.alias, "title": agent.title, "addr": agent.addr}))
         .collect();
     let peers: Vec<_> = inner.peers.iter().cloned().collect();
     Json(json!({"local": local, "remote": remote, "peers": peers, "self": inner.advertise}))
@@ -760,6 +771,7 @@ async fn announce(
                     agent.id.clone(),
                     RemoteAgent {
                         alias: agent.alias,
+                        title: agent.title,
                         addr: agent.addr,
                     },
                 );
@@ -921,12 +933,14 @@ fn announce_response(inner: &Inner) -> Json<AnnounceResp> {
         .map(|(id, agent)| AgentInfo {
             id: id.clone(),
             alias: agent.alias.clone(),
+            title: agent.title.clone(),
             addr: inner.advertise.clone(),
         })
         .collect();
     agents.extend(inner.remote_agents.iter().map(|(id, agent)| AgentInfo {
         id: id.clone(),
         alias: agent.alias.clone(),
+        title: agent.title.clone(),
         addr: agent.addr.clone(),
     }));
     Json(AnnounceResp {
@@ -995,6 +1009,7 @@ async fn announce_to_peer(state: &AppState, peer: &str) -> Result<(), String> {
                 .map(|(id, agent)| AgentInfo {
                     id: id.clone(),
                     alias: agent.alias.clone(),
+                    title: agent.title.clone(),
                     addr: inner.advertise.clone(),
                 })
                 .collect(),
@@ -1036,6 +1051,7 @@ async fn announce_to_peer(state: &AppState, peer: &str) -> Result<(), String> {
                 agent.id.clone(),
                 RemoteAgent {
                     alias: agent.alias,
+                    title: agent.title,
                     addr: agent.addr,
                 },
             );
@@ -1283,6 +1299,13 @@ mod tests {
     #[test]
     fn parses_connector_peer_event() {
         self_check();
+    }
+
+    #[test]
+    fn parses_agent_without_title() {
+        let agent: AgentInfo =
+            serde_json::from_str(r#"{"id":"a","alias":"b","addr":"c"}"#).unwrap();
+        assert_eq!(agent.title, None);
     }
 
     #[test]

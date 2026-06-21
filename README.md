@@ -78,7 +78,7 @@ agent_request(to, message, timeout_seconds?)
 
 `mesh_off` unregisters this Pi session from the local service.
 
-`agent_list` lists agents known to the local service, including their ids, aliases, and service addresses.
+`agent_list` lists agents known to the local service, including ids, aliases, titles, and service addresses.
 
 `agent_send` sends a one-way message.
 
