@@ -69,17 +69,6 @@ struct MeshMessage {
     body: Value,
 }
 
-#[derive(Debug, Serialize)]
-struct Health {
-    ok: bool,
-    version: &'static str,
-    protocol: u32,
-    machine: String,
-    advertise: String,
-    local_agents: Vec<AgentInfo>,
-    remote_agents: Vec<AgentInfo>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AgentInfo {
     id: String,
@@ -160,12 +149,11 @@ async fn main() -> AnyResult<()> {
         return Ok(());
     }
 
-    let peers = cli_peers(&args);
-    run_daemon(peers).await?;
+    run_daemon().await?;
     Ok(())
 }
 
-async fn run_daemon(mut peers: Vec<String>) -> AnyResult<()> {
+async fn run_daemon() -> AnyResult<()> {
     let machine = machine_name();
     let control_addr: SocketAddr = env::var("PI_MESH_CONTROL_ADDR")
         .unwrap_or_else(|_| CONTROL_ADDR.to_string())
@@ -175,10 +163,6 @@ async fn run_daemon(mut peers: Vec<String>) -> AnyResult<()> {
     let env_advertise = env::var("PI_MESH_ADVERTISE").ok();
     let advertise_locked = env_advertise.is_some();
     let advertise = env_advertise.unwrap_or_else(|| format!("{}:{}", machine, port));
-    peers.extend(read_peer_file());
-    peers.sort();
-    peers.dedup();
-
     let connectors = Arc::new(find_connectors());
 
     let state = AppState {
@@ -188,7 +172,7 @@ async fn run_daemon(mut peers: Vec<String>) -> AnyResult<()> {
             machine: machine.clone(),
             local_agents: HashMap::new(),
             remote_agents: HashMap::new(),
-            peers: peers.into_iter().collect(),
+            peers: HashSet::new(),
             queues: HashMap::new(),
             waiters: HashMap::new(),
         })),
@@ -256,41 +240,33 @@ async fn bind_network() -> std::io::Result<(TcpListener, u16)> {
     ))
 }
 
-async fn health(AxumState(state): AxumState<AppState>) -> Json<Health> {
+async fn health(AxumState(state): AxumState<AppState>) -> Json<Value> {
     Json(health_payload(&state).await)
 }
 
-async fn hello(AxumState(state): AxumState<AppState>) -> Json<Health> {
+async fn hello(AxumState(state): AxumState<AppState>) -> Json<Value> {
     Json(health_payload(&state).await)
 }
 
-async fn health_payload(state: &AppState) -> Health {
+async fn health_payload(state: &AppState) -> Value {
     let inner = state.inner.lock().await;
-    Health {
-        ok: true,
-        version: VERSION,
-        protocol: PROTOCOL_VERSION,
-        machine: inner.machine.clone(),
-        advertise: inner.advertise.clone(),
-        local_agents: inner
-            .local_agents
-            .iter()
-            .map(|(id, agent)| AgentInfo {
-                id: id.clone(),
-                alias: agent.alias.clone(),
-                addr: inner.advertise.clone(),
-            })
-            .collect(),
-        remote_agents: inner
-            .remote_agents
-            .iter()
-            .map(|(id, agent)| AgentInfo {
-                id: id.clone(),
-                alias: agent.alias.clone(),
-                addr: agent.addr.clone(),
-            })
-            .collect(),
-    }
+    json!({
+        "ok": true,
+        "version": VERSION,
+        "protocol": PROTOCOL_VERSION,
+        "machine": inner.machine,
+        "advertise": inner.advertise,
+        "local_agents": inner.local_agents.iter().map(|(id, agent)| AgentInfo {
+            id: id.clone(),
+            alias: agent.alias.clone(),
+            addr: inner.advertise.clone(),
+        }).collect::<Vec<_>>(),
+        "remote_agents": inner.remote_agents.iter().map(|(id, agent)| AgentInfo {
+            id: id.clone(),
+            alias: agent.alias.clone(),
+            addr: agent.addr.clone(),
+        }).collect::<Vec<_>>(),
+    })
 }
 
 async fn local_shutdown() -> impl IntoResponse {
@@ -845,44 +821,6 @@ fn machine_name() -> String {
         .unwrap_or_else(|| "machine".into())
 }
 
-fn cli_peers(args: &[String]) -> Vec<String> {
-    let mut peers = Vec::new();
-    let mut i = 1;
-    while i < args.len() {
-        if args[i] == "--peer" || args[i] == "peer" {
-            if let Some(peer) = args.get(i + 1) {
-                peers.push(peer.clone());
-                i += 1;
-            }
-        }
-        i += 1;
-    }
-    if let Ok(env_peers) = env::var("PI_MESH_PEERS") {
-        peers.extend(
-            env_peers
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty()),
-        );
-    }
-    peers
-}
-
-fn read_peer_file() -> Vec<String> {
-    let Some(home) = env::var_os("HOME") else {
-        return vec![];
-    };
-    let path = PathBuf::from(home).join(".pi/mesh/peers");
-    let Ok(text) = fs::read_to_string(path) else {
-        return vec![];
-    };
-    text.lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(ToString::to_string)
-        .collect()
-}
-
 fn self_check() {
     let line = r#"{"type":"peer","addr":"127.0.0.1:7373"}"#;
     let event: ConnectorEvent = serde_json::from_str(line).unwrap();
@@ -897,18 +835,5 @@ mod tests {
     #[test]
     fn parses_connector_peer_event() {
         self_check();
-    }
-
-    #[test]
-    fn parses_cli_peers() {
-        let args = vec![
-            "pi-mesh".to_string(),
-            "daemon".to_string(),
-            "--peer".to_string(),
-            "one:7373".to_string(),
-            "peer".to_string(),
-            "two:7373".to_string(),
-        ];
-        assert_eq!(cli_peers(&args), vec!["one:7373", "two:7373"]);
     }
 }

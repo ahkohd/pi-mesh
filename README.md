@@ -67,10 +67,16 @@ Services learn about each other from known peer addresses, connectors, and peer 
 ## Agent tools
 
 ```text
+mesh_on(peer?)
+mesh_off()
 agent_list()
 agent_send(to, message)
 agent_request(to, message, timeout_seconds?)
 ```
+
+`mesh_on` registers this Pi session with the local service. With a peer address, it also connects to that peer.
+
+`mesh_off` unregisters this Pi session from the local service.
 
 `agent_list` lists agents known to the local service, including their ids, aliases, and service addresses.
 
@@ -110,12 +116,6 @@ To join through a known peer:
 /mesh on 100.64.0.8:7373
 ```
 
-You can also start the service directly:
-
-```bash
-pi-mesh daemon --peer 100.64.0.8:7373
-```
-
 On startup it prints the local control address, the network listen address, and the address it advertises to peers:
 
 ```text
@@ -138,9 +138,6 @@ Known peers are service addresses in `host:port` form.
 Sources:
 
 - `/mesh on host:port`
-- `pi-mesh daemon --peer host:port`
-- `PI_MESH_PEERS=host1:7373,host2:7373`
-- `~/.pi/mesh/peers`, one address per line, with `#` comments allowed
 - connector discovery events
 
 ## Connectors
@@ -194,7 +191,6 @@ Connector-specific docs:
 | `PI_MESH_LISTEN_HOST` | `0.0.0.0` | Network API bind host. |
 | `PI_MESH_PORT` | `7373` | First network port to try. Ports are scanned through `7399`. |
 | `PI_MESH_ADVERTISE` | `<machine>:<port>` | Address announced to peers. If unset, a connector may replace it with a reachable address. |
-| `PI_MESH_PEERS` | unset | Comma-separated peer addresses. |
 | `PI_MESH_INSECURE` | unset | Set to `1` to allow non-loopback inbound traffic without connector auth. Use only for local tests. |
 
 ## Development

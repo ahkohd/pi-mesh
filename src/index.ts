@@ -28,7 +28,6 @@ type MeshMsg = {
   from: string;
   to: string;
   id: string;
-  re?: string | null;
   kind: "send" | "request";
   body: unknown;
 };
@@ -47,16 +46,8 @@ export default function (pi: ExtensionAPI) {
       const rest = restParts.join(" ") || undefined;
 
       if (cmd === "on") {
-        const id = makeAgentId(ctx);
-        const alias = await loadAlias(id);
-        agentId = id;
-        agentAlias = alias;
-        await ensureDaemon();
-        if (rest) await post("/local/peer", { addr: rest });
-        await registerSelf();
-        startPolling(pi, id);
-        startHeartbeat();
-        ctx.ui.notify(`mesh on: ${alias} (${id})`, "info");
+        await turnMeshOn(pi, ctx, rest);
+        ctx.ui.notify(`mesh on: ${agentAlias} (${agentId})`, "info");
         return;
       }
 
@@ -81,12 +72,36 @@ export default function (pi: ExtensionAPI) {
         await saveAlias(id, alias);
         agentId = id;
         agentAlias = alias;
-        if (await daemonUp()) await registerSelf();
+        if (await daemonCompatible()) await registerSelf();
         ctx.ui.notify(`alias: ${alias}`, "info");
         return;
       }
 
       ctx.ui.notify("usage: /mesh on [peer] | off | list | alias [name]", "error");
+    },
+  });
+
+  pi.registerTool({
+    name: "mesh_on",
+    label: "Mesh On",
+    description: "Register this Pi session with pi-mesh.",
+    parameters: Type.Object({
+      peer: Type.Optional(Type.String({ description: "Optional peer service address host:port" })),
+    }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      await turnMeshOn(pi, ctx, params.peer);
+      return { content: [{ type: "text", text: await agentListText() }], details: currentAgent() ?? {} };
+    },
+  });
+
+  pi.registerTool({
+    name: "mesh_off",
+    label: "Mesh Off",
+    description: "Unregister this Pi session from pi-mesh.",
+    parameters: Type.Object({}),
+    async execute() {
+      await meshOff();
+      return { content: [{ type: "text", text: "mesh off" }], details: {} };
     },
   });
 
@@ -155,6 +170,18 @@ export default function (pi: ExtensionAPI) {
   });
 }
 
+async function turnMeshOn(pi: ExtensionAPI, ctx: any, peer?: string) {
+  const id = makeAgentId(ctx);
+  const alias = await loadAlias(id);
+  agentId = id;
+  agentAlias = alias;
+  await ensureDaemon();
+  if (peer) await post("/local/peer", { addr: peer });
+  await registerSelf();
+  startPolling(pi, id);
+  startHeartbeat();
+}
+
 async function ensureDaemon() {
   if (await daemonCompatible()) return;
   await post("/local/shutdown", {}).catch(() => undefined);
@@ -212,15 +239,6 @@ async function daemonCompatible() {
   try {
     const health = await getJson("/health");
     return health.protocol === PROTOCOL_VERSION;
-  } catch {
-    return false;
-  }
-}
-
-async function daemonUp() {
-  try {
-    await getJson("/health");
-    return true;
   } catch {
     return false;
   }
