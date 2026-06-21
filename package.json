@@ -16,7 +16,8 @@
   "types": "dist/index.d.ts",
   "bin": {
     "pi-mesh": "bin/pi-mesh.js",
-    "pi-mesh-tailscale": "bin/pi-mesh-tailscale.js"
+    "pi-mesh-tailscale": "bin/pi-mesh-tailscale.js",
+    "pi-mesh-mcp": "bin/pi-mesh-mcp.js"
   },
   "pi": {
     "extensions": [
@@ -42,7 +43,9 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.78.0",
-    "typebox": "^1.1.38"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "typebox": "^1.1.38",
+    "zod": "^4.4.3"
   },
   "optionalDependencies": {
     "@ahkohd/pi-mesh-darwin-arm64": "0.1.2",

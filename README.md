@@ -181,6 +181,27 @@ Connector-specific docs:
 
 - [Tailscale](docs/connectors/tailscale.md)
 
+## MCP
+
+Local MCP clients can use `pi-mesh-mcp` over stdio:
+
+```json
+{
+  "mcpServers": {
+    "pi-mesh": { "command": "pi-mesh-mcp" }
+  }
+}
+```
+
+For a container or any host without Pi:
+
+```bash
+npm install -g @ahkohd/pi-mesh
+pi-mesh daemon
+```
+
+Then `pi-mesh-mcp` can route to remote Pi agents through the mesh.
+
 ## Configuration
 
 | Variable | Default | Description |
