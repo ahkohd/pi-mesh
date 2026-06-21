@@ -1,4 +1,4 @@
-import { keyHint, truncateToVisualLines, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { keyHint, keyText, rawKeyHint, truncateToVisualLines, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -446,12 +446,17 @@ function formatIncoming(msg: MeshMsg) {
 }
 
 function outgoingPreview(action: string, to: string, message: string, expanded: boolean, theme?: any) {
-  return `${action} ${theme?.fg?.("accent", to) ?? to}\n${expanded ? message : trimPreview(message)}`;
+  const head = theme ? `${theme.bold(action)} ${theme.fg("accent", to)}` : `${action} ${to}`;
+  return `${head}\n${expanded ? message : trimPreview(message)}`;
 }
 
 function trimPreview(text: string) {
   if (text.length <= 800) return text;
-  return `${text.slice(0, 800)}... (${text.length - 800} more chars, ${keyHint("app.tools.expand", "to expand")})`;
+  return `${text.slice(0, 800)}... (${text.length - 800} more chars, ${expandHint()})`;
+}
+
+function expandHint() {
+  return keyText("app.tools.expand") ? keyHint("app.tools.expand", "to expand") : rawKeyHint("ctrl+o", "to expand");
 }
 
 function textComponent(text: string, expanded: boolean) {
@@ -459,7 +464,7 @@ function textComponent(text: string, expanded: boolean) {
     render: (width: number) => {
       const lines = truncateToVisualLines(text, Number.MAX_SAFE_INTEGER, Math.max(1, width)).visualLines;
       if (expanded || lines.length <= 12) return lines;
-      const hint = `... (${lines.length - 12} more lines, ${keyHint("app.tools.expand", "to expand")})`;
+      const hint = `... (${lines.length - 12} more lines, ${expandHint()})`;
       return [...lines.slice(0, 12), ...truncateToVisualLines(hint, 1, Math.max(1, width)).visualLines];
     },
     invalidate: () => undefined,
