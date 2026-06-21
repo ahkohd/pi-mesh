@@ -1,6 +1,6 @@
 {
   "name": "@ahkohd/pi-mesh",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "P2P Pi agent mesh with pluggable discovery connectors.",
   "license": "MIT",
   "repository": {
@@ -45,10 +45,10 @@
     "typebox": "^1.1.38"
   },
   "optionalDependencies": {
-    "@ahkohd/pi-mesh-darwin-arm64": "0.1.3",
-    "@ahkohd/pi-mesh-darwin-x64": "0.1.3",
-    "@ahkohd/pi-mesh-linux-arm64-gnu": "0.1.3",
-    "@ahkohd/pi-mesh-linux-x64-gnu": "0.1.3"
+    "@ahkohd/pi-mesh-darwin-arm64": "0.1.4",
+    "@ahkohd/pi-mesh-darwin-x64": "0.1.4",
+    "@ahkohd/pi-mesh-linux-arm64-gnu": "0.1.4",
+    "@ahkohd/pi-mesh-linux-x64-gnu": "0.1.4"
   },
   "devDependencies": {
     "@types/node": "^25.8.0",
