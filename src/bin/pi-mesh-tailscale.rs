@@ -6,8 +6,36 @@ fn main() {
     match args.get(1).map(String::as_str) {
         Some("auth") => auth(&args),
         Some("run") => run(&args),
-        _ => eprintln!("usage: pi-mesh-tailscale run --port 7373 | auth --remote-ip 100.x.y.z"),
+        Some("status") => status(),
+        _ => eprintln!(
+            "usage: pi-mesh-tailscale run --port 7373 | auth --remote-ip 100.x.y.z | status --json"
+        ),
     }
+}
+
+fn status() {
+    let Some(v) = tailscale_status() else {
+        println!("{}", json!({"ok": false}));
+        return;
+    };
+    let peers = v
+        .get("Peer")
+        .and_then(Value::as_object)
+        .map(|peers| {
+            peers
+                .values()
+                .filter(|peer| peer.get("Online").and_then(Value::as_bool) != Some(false))
+                .count()
+        })
+        .unwrap_or(0);
+    println!(
+        "{}",
+        json!({
+            "ok": true,
+            "self": v.get("Self").and_then(node_ip),
+            "peers": peers
+        })
+    );
 }
 
 fn auth(args: &[String]) {
@@ -29,16 +57,7 @@ fn run(args: &[String]) {
 }
 
 fn discover(port: &str) {
-    let Ok(output) = Command::new("tailscale")
-        .args(["status", "--json"])
-        .output()
-    else {
-        return;
-    };
-    if !output.status.success() {
-        return;
-    }
-    let Ok(v) = serde_json::from_slice::<Value>(&output.stdout) else {
+    let Some(v) = tailscale_status() else {
         return;
     };
     if let Some(addr) = v.get("Self").and_then(|node| node_addr(node, port)) {
@@ -59,13 +78,24 @@ fn discover(port: &str) {
     }
 }
 
-fn node_addr(node: &Value, port: &str) -> Option<String> {
-    if let Some(ip) = node
-        .get("TailscaleIPs")
+fn tailscale_status() -> Option<Value> {
+    let output = Command::new("tailscale")
+        .args(["status", "--json"])
+        .output()
+        .ok()?;
+    output.status.success().then_some(())?;
+    serde_json::from_slice::<Value>(&output.stdout).ok()
+}
+
+fn node_ip(node: &Value) -> Option<&str> {
+    node.get("TailscaleIPs")
         .and_then(Value::as_array)
         .and_then(|ips| ips.first())
         .and_then(Value::as_str)
-    {
+}
+
+fn node_addr(node: &Value, port: &str) -> Option<String> {
+    if let Some(ip) = node_ip(node) {
         return Some(format!("{ip}:{port}"));
     }
 

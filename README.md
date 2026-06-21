@@ -139,6 +139,7 @@ From a terminal or SSH session, use the service CLI:
 pi-mesh start [peer]
 pi-mesh status
 pi-mesh list
+pi-mesh connectors
 pi-mesh peer 100.64.0.8:7373
 pi-mesh send clever-otter@mbp "hello from ssh"
 pi-mesh request clever-otter@mbp "what are you working on?"
@@ -179,6 +180,8 @@ Sources:
 ## Connectors
 
 Core mesh code only knows service addresses. Connectors handle discovery and authorization for a network.
+
+`pi-mesh connectors` lists available connectors. A connector can include optional metadata.
 
 Connector executables are named:
 

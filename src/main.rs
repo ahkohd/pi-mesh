@@ -177,6 +177,7 @@ async fn try_main() -> AnyResult<()> {
         Some("stop") => command_stop(cli.json).await?,
         Some("status") => command_status(cli.json).await?,
         Some("list") => command_list(cli.json).await?,
+        Some("connectors") => command_connectors(cli.json).await?,
         Some("peer") => command_peer(required_arg(rest, "peer <addr>")?, cli.json).await?,
         Some("send") => command_send(parse_message_args(rest, false)?, cli.json).await?,
         Some("request") => command_request(parse_message_args(rest, true)?, cli.json).await?,
@@ -254,6 +255,33 @@ async fn command_list(json_output: bool) -> AnyResult<()> {
         print_json(list);
     } else {
         println!("{}", format_list(&list));
+    }
+    Ok(())
+}
+
+async fn command_connectors(json_output: bool) -> AnyResult<()> {
+    let mut connectors = Vec::new();
+    for path in find_connectors() {
+        let name = connector_name(&path);
+        let metadata = connector_metadata(&path).await;
+        connectors.push((name, path, metadata));
+    }
+
+    if json_output {
+        print_json(json!({
+            "connectors": connectors.iter().map(|(name, path, metadata)| {
+                json!({"name": name, "path": path.to_string_lossy(), "metadata": metadata})
+            }).collect::<Vec<_>>()
+        }));
+    } else if connectors.is_empty() {
+        println!("none");
+    } else {
+        for (name, _, metadata) in connectors {
+            match metadata {
+                Some(metadata) => println!("{name} {metadata}"),
+                None => println!("{name} found"),
+            }
+        }
     }
     Ok(())
 }
@@ -1063,6 +1091,30 @@ async fn run_connector(state: AppState, connector: PathBuf, port: u16) {
     }
 }
 
+async fn connector_metadata(path: &PathBuf) -> Option<Value> {
+    let output = time::timeout(
+        Duration::from_secs(2),
+        Command::new(path).arg("status").arg("--json").output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    serde_json::from_slice(&output.stdout).ok()
+}
+
+fn connector_name(path: &std::path::Path) -> String {
+    path.file_name()
+        .and_then(|x| x.to_str())
+        .unwrap_or("unknown")
+        .trim_start_matches("pi-mesh-")
+        .trim_end_matches(".exe")
+        .trim_end_matches(".js")
+        .to_string()
+}
+
 fn find_connectors() -> Vec<PathBuf> {
     let mut out = Vec::new();
     let Some(paths) = env::var_os("PATH") else {
@@ -1077,9 +1129,20 @@ fn find_connectors() -> Vec<PathBuf> {
             let Some(name) = path.file_name().and_then(|x| x.to_str()) else {
                 continue;
             };
-            if name.starts_with("pi-mesh-") {
-                out.push(path);
+            if !name.starts_with("pi-mesh-") || !path.is_file() {
+                continue;
             }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if fs::metadata(&path)
+                    .map(|m| m.permissions().mode() & 0o111 == 0)
+                    .unwrap_or(true)
+                {
+                    continue;
+                }
+            }
+            out.push(path);
         }
     }
     out.sort();
@@ -1188,6 +1251,7 @@ fn print_usage() {
   pi-mesh stop
   pi-mesh status
   pi-mesh list
+  pi-mesh connectors
   pi-mesh peer <addr>
   pi-mesh send <to> <message>
   pi-mesh request <to> <message>
@@ -1219,6 +1283,18 @@ mod tests {
     #[test]
     fn parses_connector_peer_event() {
         self_check();
+    }
+
+    #[test]
+    fn names_connector() {
+        assert_eq!(
+            connector_name(std::path::Path::new("/bin/pi-mesh-tailscale")),
+            "tailscale"
+        );
+        assert_eq!(
+            connector_name(std::path::Path::new("pi-mesh-tailscale.js")),
+            "tailscale"
+        );
     }
 
     #[test]
