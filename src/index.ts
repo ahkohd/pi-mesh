@@ -38,6 +38,7 @@ type MeshState = { on?: boolean; peer?: string };
 let agentId: string | undefined;
 let agentAlias: string | undefined;
 let agentTitle: string | undefined;
+let agentRuntime: Record<string, unknown> | undefined;
 let pollAbort: AbortController | undefined;
 let heartbeat: NodeJS.Timeout | undefined;
 let pendingReplyIds: string[] = [];
@@ -200,11 +201,12 @@ async function turnMeshOn(pi: ExtensionAPI, ctx: any, peer?: string) {
   agentId = id;
   agentAlias = alias;
   agentTitle = currentTitle(pi);
+  agentRuntime = currentRuntime(ctx);
   await ensureDaemon();
   if (peer) await post("/local/peer", { addr: peer });
   await registerSelf();
   startPolling(pi, id);
-  startHeartbeat(pi);
+  startHeartbeat(pi, ctx);
 }
 
 async function ensureDaemon() {
@@ -271,7 +273,7 @@ async function daemonCompatible() {
 
 async function registerSelf() {
   if (!agentId || !agentAlias) return;
-  await post("/local/register", { id: agentId, alias: agentAlias, title: agentTitle });
+  await post("/local/register", { id: agentId, alias: agentAlias, title: agentTitle, runtime: agentRuntime });
 }
 
 function startPolling(pi: ExtensionAPI, id: string) {
@@ -295,10 +297,11 @@ async function pollLoop(pi: ExtensionAPI, id: string, signal: AbortSignal) {
   }
 }
 
-function startHeartbeat(pi: ExtensionAPI) {
+function startHeartbeat(pi: ExtensionAPI, ctx: any) {
   clearInterval(heartbeat);
   heartbeat = setInterval(() => {
     agentTitle = currentTitle(pi);
+    agentRuntime = currentRuntime(ctx);
     void registerSelf().catch(() => undefined);
   }, 1_000);
 }
@@ -312,6 +315,7 @@ async function meshOff() {
   agentId = undefined;
   agentAlias = undefined;
   agentTitle = undefined;
+  agentRuntime = undefined;
   pendingReplyIds = [];
 }
 
@@ -329,6 +333,22 @@ function persistedMeshState(ctx: any): MeshState {
 
 function currentTitle(pi: ExtensionAPI) {
   return pi.getSessionName()?.trim() || undefined;
+}
+
+function currentRuntime(ctx: any) {
+  const model = ctx.model;
+  if (!model) return undefined;
+  const usage = ctx.getContextUsage?.();
+  return {
+    model: model.name ?? model.id,
+    provider: model.provider,
+    context: usage && {
+      used: usage.tokens,
+      total: usage.contextWindow,
+      free: usage.tokens == null ? null : Math.max(0, usage.contextWindow - usage.tokens),
+      percent: usage.percent,
+    },
+  };
 }
 
 function makeAgentId(ctx: any) {
@@ -407,19 +427,27 @@ async function agentListText() {
 }
 
 function currentAgent() {
-  return agentId && agentAlias ? { id: agentId, alias: agentAlias, title: agentTitle } : undefined;
+  return agentId && agentAlias ? { id: agentId, alias: agentAlias, title: agentTitle, runtime: agentRuntime } : undefined;
 }
 
 function meshOffText() {
   return "current: mesh off (this Pi session is not registered)";
 }
 
-function formatList(list: any, current?: { id: string; alias: string; title?: string }) {
-  const show = (x: any) => `${x.alias}${x.title ? ` - ${x.title}` : ""} (${x.id}) ${x.addr}${current?.id === x.id ? " [me]" : ""}`;
+function formatList(list: any, current?: { id: string; alias: string; title?: string; runtime?: any }) {
+  const show = (x: any) => `${x.alias}${x.title ? ` - ${x.title}` : ""}${runtimeLabel(x)} (${x.id}) ${x.addr}${current?.id === x.id ? " [me]" : ""}`;
   const local = (list.local ?? []).map(show).join("\n  ") || "none";
   const remote = (list.remote ?? []).map(show).join("\n  ") || "none";
-  const me = current ? `${current.alias}${current.title ? ` - ${current.title}` : ""} (${current.id})` : "mesh off (this Pi session is not registered)";
+  const me = current ? `${current.alias}${current.title ? ` - ${current.title}` : ""}${runtimeLabel(current)} (${current.id})` : "mesh off (this Pi session is not registered)";
   return `current: ${me}\nservice: ${list.self}\nlocal:\n  ${local}\nremote:\n  ${remote}`;
+}
+
+function runtimeLabel(x: any) {
+  const model = x.runtime?.model;
+  if (!model) return "";
+  const provider = x.runtime?.provider ? `@${x.runtime.provider}` : "";
+  const free = x.runtime?.context?.free;
+  return ` [${model}${provider}${typeof free === "number" ? `, ${free} ctx free` : ""}]`;
 }
 
 async function getJson(path: string) {

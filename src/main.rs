@@ -52,6 +52,7 @@ struct Inner {
 struct LocalAgent {
     alias: String,
     title: Option<String>,
+    runtime: Option<Value>,
     last_seen: Instant,
 }
 
@@ -59,6 +60,7 @@ struct LocalAgent {
 struct RemoteAgent {
     alias: String,
     title: Option<String>,
+    runtime: Option<Value>,
     addr: String,
 }
 
@@ -76,6 +78,7 @@ struct AgentInfo {
     id: String,
     alias: String,
     title: Option<String>,
+    runtime: Option<Value>,
     addr: String,
 }
 
@@ -84,6 +87,7 @@ struct RegisterReq {
     id: String,
     alias: String,
     title: Option<String>,
+    runtime: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -507,6 +511,25 @@ fn value_str<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value.get(key).and_then(Value::as_str)
 }
 
+fn runtime_label(agent: &Value) -> String {
+    let Some(runtime) = agent.get("runtime") else {
+        return String::new();
+    };
+    let Some(model) = value_str(runtime, "model") else {
+        return String::new();
+    };
+    let provider = value_str(runtime, "provider")
+        .map(|provider| format!("@{provider}"))
+        .unwrap_or_default();
+    let free = runtime
+        .get("context")
+        .and_then(|ctx| ctx.get("free"))
+        .and_then(Value::as_u64)
+        .map(|free| format!(", {free} ctx free"))
+        .unwrap_or_default();
+    format!(" [{model}{provider}{free}]")
+}
+
 fn format_list(list: &Value) -> String {
     let local = format_agents(list, "local");
     let remote = format_agents(list, "remote");
@@ -538,9 +561,10 @@ fn format_agents(list: &Value, key: &str) -> String {
                         .map(|title| format!(" - {title}"))
                         .unwrap_or_default();
                     format!(
-                        "{}{} ({}) {}",
+                        "{}{}{} ({}) {}",
                         value_str(agent, "alias").unwrap_or("unknown"),
                         title,
+                        runtime_label(agent),
                         value_str(agent, "id").unwrap_or("unknown"),
                         value_str(agent, "addr").unwrap_or("unknown")
                     )
@@ -572,12 +596,14 @@ async fn health_payload(state: &AppState) -> Value {
             id: id.clone(),
             alias: agent.alias.clone(),
             title: agent.title.clone(),
+            runtime: agent.runtime.clone(),
             addr: inner.advertise.clone(),
         }).collect::<Vec<_>>(),
         "remote_agents": inner.remote_agents.iter().map(|(id, agent)| AgentInfo {
             id: id.clone(),
             alias: agent.alias.clone(),
             title: agent.title.clone(),
+            runtime: agent.runtime.clone(),
             addr: agent.addr.clone(),
         }).collect::<Vec<_>>(),
     })
@@ -616,6 +642,7 @@ async fn register(
         LocalAgent {
             alias: req.alias.clone(),
             title: req.title.clone(),
+            runtime: req.runtime.clone(),
             last_seen: Instant::now(),
         },
     );
@@ -640,12 +667,12 @@ async fn list(AxumState(state): AxumState<AppState>) -> Json<Value> {
     let local: Vec<_> = inner
         .local_agents
         .iter()
-        .map(|(id, agent)| json!({"id": id, "alias": agent.alias, "title": agent.title, "addr": inner.advertise}))
+        .map(|(id, agent)| json!({"id": id, "alias": agent.alias, "title": agent.title, "runtime": agent.runtime, "addr": inner.advertise}))
         .collect();
     let remote: Vec<_> = inner
         .remote_agents
         .iter()
-        .map(|(id, agent)| json!({"id": id, "alias": agent.alias, "title": agent.title, "addr": agent.addr}))
+        .map(|(id, agent)| json!({"id": id, "alias": agent.alias, "title": agent.title, "runtime": agent.runtime, "addr": agent.addr}))
         .collect();
     let peers: Vec<_> = inner.peers.iter().cloned().collect();
     Json(json!({"local": local, "remote": remote, "peers": peers, "self": inner.advertise}))
@@ -772,6 +799,7 @@ async fn announce(
                     RemoteAgent {
                         alias: agent.alias,
                         title: agent.title,
+                        runtime: agent.runtime,
                         addr: agent.addr,
                     },
                 );
@@ -934,6 +962,7 @@ fn announce_response(inner: &Inner) -> Json<AnnounceResp> {
             id: id.clone(),
             alias: agent.alias.clone(),
             title: agent.title.clone(),
+            runtime: agent.runtime.clone(),
             addr: inner.advertise.clone(),
         })
         .collect();
@@ -941,6 +970,7 @@ fn announce_response(inner: &Inner) -> Json<AnnounceResp> {
         id: id.clone(),
         alias: agent.alias.clone(),
         title: agent.title.clone(),
+        runtime: agent.runtime.clone(),
         addr: agent.addr.clone(),
     }));
     Json(AnnounceResp {
@@ -1010,6 +1040,7 @@ async fn announce_to_peer(state: &AppState, peer: &str) -> Result<(), String> {
                     id: id.clone(),
                     alias: agent.alias.clone(),
                     title: agent.title.clone(),
+                    runtime: agent.runtime.clone(),
                     addr: inner.advertise.clone(),
                 })
                 .collect(),
@@ -1052,6 +1083,7 @@ async fn announce_to_peer(state: &AppState, peer: &str) -> Result<(), String> {
                 RemoteAgent {
                     alias: agent.alias,
                     title: agent.title,
+                    runtime: agent.runtime,
                     addr: agent.addr,
                 },
             );
