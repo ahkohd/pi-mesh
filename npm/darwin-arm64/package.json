@@ -1,6 +1,6 @@
 {
   "name": "@ahkohd/pi-mesh-darwin-arm64",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Prebuilt service binaries for @ahkohd/pi-mesh (darwin arm64)",
   "license": "MIT",
   "repository": {
